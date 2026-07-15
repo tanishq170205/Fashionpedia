@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fashion Search — Glance ML</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #07080f;
+      --surface:   #0f1118;
+      --surface2:  #161820;
+      --border:    rgba(255,255,255,0.07);
+      --accent:    #7c3aed;
+      --accent2:   #a855f7;
+      --pink:      #ec4899;
+      --text:      #e8eaf0;
+      --muted:     #6b7280;
+      --score-bar: #1e1f2e;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 20px 40px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(7,8,15,0.85);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo {
+      font-size: 18px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent2), var(--pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.3px;
+    }
+    .logo-sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 4px; }
+
+    /* ── Hero / Search ── */
+    .hero {
+      padding: 60px 40px 40px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #fff 40%, var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+    .hero p { color: var(--muted); font-size: 15px; margin-bottom: 32px; }
+
+    .search-wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      gap: 12px;
+    }
+    .search-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 20px;
+      color: var(--text);
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+    }
+    .search-input::placeholder { color: var(--muted); }
+
+    .search-btn {
+      background: linear-gradient(135deg, var(--accent), var(--pink));
+      border: none;
+      border-radius: 12px;
+      padding: 14px 28px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .search-btn:hover { opacity: 0.9; }
+    .search-btn:active { transform: scale(0.98); }
+    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Example queries ── */
+    .examples {
+      max-width: 720px;
+      margin: 16px auto 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+    }
+    .example-chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .example-chip:hover { border-color: var(--accent); color: var(--accent2); }
+
+    /* ── Parsed query pill ── */
+    .parsed-bar {
+      max-width: 1200px;
+      margin: 0 auto 24px;
+      padding: 0 40px;
+      display: none;
+    }
+    .parsed-inner {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .parsed-label { color: var(--muted); font-weight: 500; }
+    .parsed-tag {
+      background: rgba(124,58,237,0.15);
+      border: 1px solid rgba(124,58,237,0.3);
+      border-radius: 6px;
+      padding: 3px 10px;
+      color: var(--accent2);
+      font-weight: 500;
+    }
+    .parsed-tag.color-tag {
+      background: rgba(236,72,153,0.12);
+      border-color: rgba(236,72,153,0.3);
+      color: var(--pink);
+    }
+    .parsed-tag.setting-tag {
+      background: rgba(16,185,129,0.12);
+      border-color: rgba(16,185,129,0.3);
+      color: #34d399;
+    }
+    .llm-badge {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 2px 8px;
+    }
+
+    /* ── Main layout ── */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 40px 60px;
+    }
+
+    .results-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .results-count { color: var(--muted); font-size: 13px; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 20px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+      animation: fadeUp 0.35s ease both;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(124,58,237,0.4);
+      box-shadow: 0 8px 32px rgba(124,58,237,0.12);
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .card:nth-child(2)  { animation-delay: 0.04s; }
+    .card:nth-child(3)  { animation-delay: 0.08s; }
+    .card:nth-child(4)  { animation-delay: 0.12s; }
+    .card:nth-child(5)  { animation-delay: 0.16s; }
+    .card:nth-child(6)  { animation-delay: 0.20s; }
+    .card:nth-child(7)  { animation-delay: 0.24s; }
+    .card:nth-child(8)  { animation-delay: 0.28s; }
+    .card:nth-child(9)  { animation-delay: 0.32s; }
+    .card:nth-child(10) { animation-delay: 0.36s; }
+
+    .card-img {
+      width: 100%;
+      aspect-ratio: 3/4;
+      object-fit: cover;
+      display: block;
+      background: var(--surface2);
+    }
+
+    .card-body { padding: 14px; }
+
+    .rank-score {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .rank-badge {
+      background: linear-gradient(135deg, var(--accent), var(--pink));
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .final-score {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .final-score span { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+    /* ── Score bars ── */
+    .score-rows { display: flex; flex-direction: column; gap: 6px; }
+    .score-row { display: flex; align-items: center; gap: 8px; }
+    .score-row-label { width: 60px; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+    .bar-track {
+      flex: 1;
+      height: 5px;
+      background: var(--score-bar);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .bar-fill.clip    { background: linear-gradient(90deg, #7c3aed, #a855f7); }
+    .bar-fill.attr    { background: linear-gradient(90deg, #ec4899, #f97316); }
+    .bar-fill.setting { background: linear-gradient(90deg, #06b6d4, #3b82f6); }
+    .score-val { font-size: 11px; color: var(--muted); width: 30px; text-align: right; flex-shrink: 0; }
+
+    /* ── Matched attributes ── */
+    .matches { margin-top: 12px; }
+    .matches-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .match-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(124,58,237,0.1);
+      border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      color: var(--accent2);
+      margin: 0 4px 4px 0;
+    }
+    .match-chip .arrow { color: var(--muted); }
+
+    /* ── States ── */
+    .state-box {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--muted);
+    }
+    .state-box .icon { font-size: 48px; margin-bottom: 16px; }
+    .state-box h2 { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.25);
+      border-radius: 10px;
+      padding: 16px 20px;
+      color: #f87171;
+      margin-bottom: 24px;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      header { padding: 16px 20px; }
+      .hero { padding: 40px 20px 28px; }
+      .hero h1 { font-size: 26px; }
+      .search-wrap { flex-direction: column; }
+      main { padding: 0 20px 40px; }
+      .grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FashionSearch <span class="logo-sub">by Glance ML</span></div>
+</header>
+
+<section class="hero">
+  <h1>Search by natural language</h1>
+  <p>Two-stage retrieval: open-vocabulary detection + semantic reranking</p>
+  <div class="search-wrap">
+    <input id="queryInput" class="search-input" type="text"
+      placeholder='e.g. "A red tie and a white shirt in a formal setting"'
+      autocomplete="off" />
+    <button id="searchBtn" class="search-btn" onclick="doSearch()">Search</button>
+  </div>
+  <div class="examples">
+    <div class="example-chip" onclick="setQuery(this)">A person in a bright yellow raincoat</div>
+    <div class="example-chip" onclick="setQuery(this)">Professional business attire inside a modern office</div>
+    <div class="example-chip" onclick="setQuery(this)">Someone wearing a blue shirt sitting on a park bench</div>
+    <div class="example-chip" onclick="setQuery(this)">Casual weekend outfit for a city walk</div>
+    <div class="example-chip" onclick="setQuery(this)">A red tie and a white shirt in a formal setting</div>
+  </div>
+</section>
+
+<div class="parsed-bar" id="parsedBar">
+  <div class="parsed-inner" id="parsedInner"></div>
+</div>
+
+<main>
+  <div id="errorBox"></div>
+  <div class="results-header" id="resultsHeader" style="display:none">
+    <span class="results-count" id="resultsCount"></span>
+  </div>
+  <div id="content">
+    <div class="state-box">
+      <div class="icon">👗</div>
+      <h2>Ready to search</h2>
+      <p>Enter a description above or click one of the example queries</p>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = '';  // same origin
+
+function setQuery(el) {
+  document.getElementById('queryInput').value = el.textContent;
+  doSearch();
+}
+
+document.getElementById('queryInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+async function doSearch() {
+  const query = document.getElementById('queryInput').value.trim();
+  if (!query) return;
+
+  const btn = document.getElementById('searchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Searching…';
+
+  document.getElementById('errorBox').innerHTML = '';
+  document.getElementById('resultsHeader').style.display = 'none';
+  document.getElementById('parsedBar').style.display = 'none';
+  document.getElementById('content').innerHTML = `
+    <div class="state-box">
+      <div class="spinner"></div>
+      <h2>Searching…</h2>
+      <p>Running two-stage retrieval pipeline</p>
+    </div>`;
+
+  try {
+    const resp = await fetch(`${API}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, k: 10 }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Unknown error');
+    }
+
+    const data = await resp.json();
+    renderParsed(data.parsed);
+    renderResults(data.results, data.query);
+  } catch (err) {
+    document.getElementById('errorBox').innerHTML =
+      `<div class="error-box">⚠ ${err.message}</div>`;
+    document.getElementById('content').innerHTML = `
+      <div class="state-box"><div class="icon">😕</div><h2>Search failed</h2><p>See error above</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+function renderParsed(parsed) {
+  const bar = document.getElementById('parsedBar');
+  const inner = document.getElementById('parsedInner');
+  inner.innerHTML = '';
+
+  const label = document.createElement('span');
+  label.className = 'parsed-label';
+  label.textContent = 'Parsed:';
+  inner.appendChild(label);
+
+  if (!parsed.garments.length && !parsed.setting) {
+    const none = document.createElement('span');
+    none.style.color = 'var(--muted)';
+    none.textContent = 'No structured attributes extracted';
+    inner.appendChild(none);
+  }
+
+  parsed.garments.forEach(g => {
+    if (g.label) {
+      const t = document.createElement('span');
+      t.className = 'parsed-tag';
+      t.textContent = g.label;
+      inner.appendChild(t);
+    }
+    if (g.color) {
+      const c = document.createElement('span');
+      c.className = 'parsed-tag color-tag';
+      c.textContent = g.color;
+      inner.appendChild(c);
+    }
+  });
+
+  if (parsed.setting) {
+    const s = document.createElement('span');
+    s.className = 'parsed-tag setting-tag';
+    s.textContent = '📍 ' + parsed.setting;
+    inner.appendChild(s);
+  }
+
+  const badge = document.createElement('span');
+  badge.className = 'llm-badge';
+  badge.textContent = parsed.llm_succeeded ? 'LLM parsed' : 'keyword fallback';
+  inner.appendChild(badge);
+
+  bar.style.display = 'block';
+}
+
+function renderResults(results, query) {
+  const header = document.getElementById('resultsHeader');
+  const count = document.getElementById('resultsCount');
+  const content = document.getElementById('content');
+
+  if (!results.length) {
+    content.innerHTML = `<div class="state-box"><div class="icon">🔍</div><h2>No results</h2><p>Try rephrasing the query</p></div>`;
+    return;
+  }
+
+  count.textContent = `${results.length} result${results.length !== 1 ? 's' : ''} for "${query}"`;
+  header.style.display = 'flex';
+
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+
+  results.forEach((r, i) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    // Image
+    const img = document.createElement('img');
+    img.className = 'card-img';
+    img.src = `/image/${r.filename}`;
+    img.alt = `Result ${r.rank}`;
+    img.loading = 'lazy';
+    img.onerror = () => { img.style.display = 'none'; };
+    card.appendChild(img);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'card-body';
+
+    // Rank + final score
+    const rs = document.createElement('div');
+    rs.className = 'rank-score';
+    rs.innerHTML = `
+      <span class="rank-badge">#${r.rank}</span>
+      <span class="final-score">${(r.final_score * 100).toFixed(1)}<span>%</span></span>`;
+    body.appendChild(rs);
+
+    // Score breakdown bars
+    const rows = document.createElement('div');
+    rows.className = 'score-rows';
+    rows.innerHTML = `
+      ${scoreRow('CLIP', r.stage1_score, 'clip')}
+      ${scoreRow('Attr', r.attribute_score, 'attr')}
+      ${scoreRow('Scene', r.setting_score, 'setting')}`;
+    body.appendChild(rows);
+
+    // Matched attributes
+    if (r.matched_attributes.length) {
+      const matches = document.createElement('div');
+      matches.className = 'matches';
+      const title = document.createElement('div');
+      title.className = 'matches-title';
+      title.textContent = 'Matched';
+      matches.appendChild(title);
+
+      r.matched_attributes.forEach(a => {
+        const chip = document.createElement('span');
+        chip.className = 'match-chip';
+        const qlabel = a.query_color ? `${a.query_color} ${a.query_label}` : a.query_label;
+        const mlabel = a.matched_region_label;
+        chip.innerHTML = `${qlabel} <span class="arrow">→</span> ${mlabel}`;
+        matches.appendChild(chip);
+      });
+
+      body.appendChild(matches);
+    }
+
+    card.appendChild(body);
+    grid.appendChild(card);
+  });
+
+  content.innerHTML = '';
+  content.appendChild(grid);
+}
+
+function scoreRow(label, value, cls) {
+  const pct = Math.min(Math.max(value, 0), 1) * 100;
+  return `
+    <div class="score-row">
+      <span class="score-row-label">${label}</span>
+      <div class="bar-track">
+        <div class="bar-fill ${cls}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+      <span class="score-val">${pct.toFixed(1)}%</span>
+    </div>`;
+}
+</script>
+</body>
+</html>

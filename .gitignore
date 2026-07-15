@@ -1,0 +1,44 @@
+# ── Datasets (large binary files — too big for GitHub) ──────────────────────
+datasets/
+*.zip
+*.tar.gz
+*.tar
+
+# ── Vector database (generated artifact — rebuilt by running the indexer) ────
+chroma_db/
+chroma_db_test/
+chroma_db_test2/
+*.sqlite3
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Logs and temp files ───────────────────────────────────────────────────────
+*.log
+install_deps.log
+install_torch.log
+index_run_summary.json
+
+# ── Environment / secrets ────────────────────────────────────────────────────
+.env
+.env.*
+*.key
+
+# ── OS junk ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,24 @@
+# Requirements
+# Pinned to minimum versions that are known to work together.
+# Install with: pip install -r requirements.txt
+#
+# CLIP is not on PyPI; install from source:
+#   pip install git+https://github.com/openai/CLIP.git
+#
+# If groundingdino fails to initialize (weight download issue or CUDA mismatch),
+# the detector module falls back automatically to OWL-ViT, which is pulled via
+# the same transformers version listed here.
+
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.40.0
+chromadb>=0.5.0
+scikit-learn>=1.4.0
+Pillow>=10.0.0
+groq>=0.9.0
+tqdm>=4.66.0
+numpy>=1.26.0
+scipy>=1.12.0
+webcolors>=1.13
+ftfy>=6.1.0
+regex>=2023.6.3
