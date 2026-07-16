@@ -1,24 +1,38 @@
 # Requirements
-# Pinned to minimum versions that are known to work together.
+# Tested environment: Python 3.12.3, Windows 11, CPU-only (no GPU).
 # Install with: pip install -r requirements.txt
 #
-# CLIP is not on PyPI; install from source:
+# CLIP (OpenAI, for ViT-B/32 / ViT-L/14 vanilla checkpoints):
 #   pip install git+https://github.com/openai/CLIP.git
+#
+# For fashion-domain CLIP (strongly recommended — directly addresses the
+# "better than vanilla CLIP" bar in the assignment):
+#   pip install open_clip_torch>=2.24.0
+#   Then re-index with: python indexer/main.py --clip-model hf-hub:Marqo/marqo-fashionCLIP
 #
 # If groundingdino fails to initialize (weight download issue or CUDA mismatch),
 # the detector module falls back automatically to OWL-ViT, which is pulled via
 # the same transformers version listed here.
 
-torch>=2.1.0
-torchvision>=0.16.0
-transformers>=4.40.0
-chromadb>=0.5.0
+torch>=2.1.0,<3.0.0
+torchvision>=0.16.0,<1.0.0
+
+# Pin a ceiling on transformers: the breaking change from 4.x to 5.x
+# (box_threshold→threshold, labels→text_labels) was already hit once.
+# Any version in [4.40, 6.0) is known-good with the current detector code.
+transformers>=4.40.0,<6.0.0
+
+chromadb>=0.5.0,<1.0.0
 scikit-learn>=1.4.0
-Pillow>=10.0.0
+Pillow>=10.0.0,<12.0.0
 groq>=0.9.0
 tqdm>=4.66.0
-numpy>=1.26.0
+numpy>=1.26.0,<3.0.0
 scipy>=1.12.0
 webcolors>=1.13
 ftfy>=6.1.0
 regex>=2023.6.3
+
+# Optional: open_clip_torch is only needed if you use fashion-domain checkpoints.
+# Uncomment the line below or install separately.
+# open_clip_torch>=2.24.0

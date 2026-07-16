@@ -20,10 +20,17 @@ class IndexerConfig:
     db_path: str = "./chroma_db"
 
     # --- Model choices ---
-    # CLIP model name as accepted by openai/CLIP's clip.load().
-    # ViT-L/14 is the default: better region-level features than ViT-B/32,
-    # worth the extra memory for an offline indexing job.
-    clip_model: str = "ViT-L/14"
+    # CLIP model name. Two backends are supported (see indexer/embedder.py):
+    #   OpenAI CLIP  : "ViT-B/32", "ViT-L/14", "ViT-B/16", "ViT-L/14@336px"
+    #   open_clip    : any "hf-hub:org/model" identifier
+    #
+    # Fashion-domain checkpoints (strongly recommended for better retrieval):
+    #   "hf-hub:Marqo/marqo-fashionCLIP"       ← best-in-class for garment text-image alignment
+    #   "hf-hub:patrickjohncyh/fashion-clip"   ← alternative, slightly smaller
+    #
+    # NOTE: changing this requires re-indexing. The mismatch guard in app/main.py
+    # will refuse to start if the stored clip_model in the collection doesn't match.
+    clip_model: str = "ViT-B/32"
     # Version tag stored in metadata; bump if you swap to a fine-tuned checkpoint.
     clip_model_version: str = "openai"
 
@@ -66,8 +73,13 @@ def parse_args() -> IndexerConfig:
     parser.add_argument(
         "--clip-model",
         default=IndexerConfig.clip_model,
-        choices=["ViT-B/32", "ViT-B/16", "ViT-L/14", "ViT-L/14@336px"],
-        help="CLIP backbone to use for image/region embeddings.",
+        help=(
+            "CLIP backbone to use for image/region embeddings. "
+            "OpenAI CLIP names: ViT-B/32, ViT-B/16, ViT-L/14. "
+            "Fashion-domain (requires open_clip_torch): "
+            "hf-hub:Marqo/marqo-fashionCLIP, hf-hub:patrickjohncyh/fashion-clip. "
+            "Changing this requires re-indexing the full dataset."
+        ),
     )
     parser.add_argument(
         "--clip-model-version",

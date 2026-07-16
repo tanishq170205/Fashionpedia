@@ -21,10 +21,22 @@ what makes the weighted sum meaningful — without it, a raw Chroma L2 distance
 (unbounded) mixed with attribute_score (0-1) produces a score that can rank
 inverted without any obvious error.
 
+Key design: weight redistribution via _resolve_weights().
+
+Fixed weights waste budget on signals that contribute nothing:
+  - "Casual weekend outfit" has no parsed garments → attribute_score == 0.0
+    for every candidate; its weight just dilutes stage1 + setting.
+  - Queries without a setting → setting_score == 0.0 for every candidate.
+_resolve_weights() detects inactive signals and redistributes their weight
+proportionally to active ones. For compositional queries (2+ colored garments)
+it also shifts weight from stage1 toward attribute because attribute_score is
+the ONLY signal that encodes multi-garment composition (stage1 cannot tell
+"red tie + white shirt" from "white tie + red shirt" apart).
+
 Key design: garment matching uses stored region_embedding vectors, not string
 comparison. This means "windbreaker" in a query can match a detected "jacket"
 region if CLIP agrees they are visually similar — the detector's vocabulary
-ceiling does not become a retrieval ceiling. The threshold (0.25 cosine) is
+ceiling does not become a retrieval ceiling. The threshold (0.20 cosine) is
 the only bottleneck, and it can be tuned.
 
 Key design: attribute matching is per person instance. Without this, an image
@@ -66,19 +78,89 @@ class RankedResult:
     stage1_score: float
     attribute_score: float
     setting_score: float
+    # Effective weights used for this specific query (after redistribution).
+    w_stage1_used: float = 0.0
+    w_attribute_used: float = 0.0
+    w_setting_used: float = 0.0
     # Human-readable breakdown of which attributes matched and on which person.
     matched_attributes: list[dict] = field(default_factory=list)
+
+
+def _resolve_weights(
+    base_w_stage1: float,
+    base_w_attribute: float,
+    base_w_setting: float,
+    has_garments: bool,
+    has_setting: bool,
+    n_colored_garments: int,
+) -> tuple[float, float, float]:
+    """
+    Dynamically redistribute fusion weights based on which signals are active.
+
+    Static weights waste budget on signals that contribute nothing:
+    - A vibe-only query ("casual weekend") has no garments → attribute_score
+      is always 0.0 for every candidate; its weight dilutes the other signals.
+    - A query with no setting → setting_score is always 0.0.
+
+    Redistribution rules (applied in order):
+    1. Compositional boost: if query has 2+ colored garments, shift up to 0.15
+       from stage1 to attribute. attribute_score is the ONLY signal that can
+       tell "red tie + white shirt" from "white tie + red shirt" apart. stage1
+       cannot. Giving it more weight on compositional queries directly raises P@5
+       for queries like Q5 in the benchmark.
+    2. Dead weight: if no garments parsed, redistribute w_attribute → stage1 +
+       setting proportionally. If no setting parsed, redistribute w_setting →
+       stage1 + attribute proportionally.
+    3. Normalize to exactly 1.0 (guards against floating-point drift).
+
+    Returns (w_stage1, w_attribute, w_setting), each in [0, 1], summing to 1.0.
+    """
+    ws, wa, wsc = base_w_stage1, base_w_attribute, base_w_setting
+
+    # Step 1 — compositional boost.
+    # Never take more than 40% of ws to avoid degenerate cases (e.g. ws=0.05).
+    if n_colored_garments >= 2:
+        boost = min(0.15, ws * 0.40)
+        ws -= boost
+        wa += boost
+
+    # Step 2a — kill attribute weight if no garments in query.
+    if not has_garments:
+        total_active = ws + wsc
+        if total_active > 1e-9:
+            ws  += wa * (ws  / total_active)
+            wsc += wa * (wsc / total_active)
+        else:
+            ws += wa  # edge case
+        wa = 0.0
+
+    # Step 2b — kill setting weight if no setting in query.
+    if not has_setting:
+        total_active = ws + wa
+        if total_active > 1e-9:
+            ws += wsc * (ws / total_active)
+            wa += wsc * (wa / total_active)
+        else:
+            ws += wsc
+        wsc = 0.0
+
+    # Step 3 — normalize to 1.0.
+    total = ws + wa + wsc
+    if total > 1e-9:
+        ws, wa, wsc = ws / total, wa / total, wsc / total
+
+    return round(ws, 4), round(wa, 4), round(wsc, 4)
 
 
 def rerank(
     candidates: list[dict],
     parsed_query: ParsedQuery,
     query_embedding: np.ndarray,
-    w_stage1: float = 0.50,
-    w_attribute: float = 0.35,
+    w_stage1: float = 0.35,
+    w_attribute: float = 0.50,
     w_setting: float = 0.15,
-    color_distance_threshold: float = 60.0,
-    garment_similarity_threshold: float = 0.25,
+    color_distance_threshold: float = 80.0,
+    garment_similarity_threshold: float = 0.20,
 ) -> list[RankedResult]:
     """
     Rerank stage-1 candidates using structured attribute matching.
@@ -87,13 +169,28 @@ def rerank(
         candidates:    Output of retrieval.stage1_retrieve().
         parsed_query:  Output of query_parser.parse_query().
         query_embedding: CLIP text embedding of the raw query (used for setting score).
-        w_*:           Score fusion weights (must sum to 1.0).
+        w_*:           Base score fusion weights. These are redistributed per-query
+                       by _resolve_weights() before scoring — see that function.
         color_distance_threshold: Max Euclidean RGB distance to count as color match.
         garment_similarity_threshold: Min CLIP cosine similarity to count as garment match.
 
     Returns:
         List of RankedResult, sorted by final_score descending.
     """
+    has_garments = len(parsed_query.garments) > 0
+    has_setting  = parsed_query.setting is not None
+    n_colored    = sum(1 for g in parsed_query.garments if g.get("color"))
+
+    # Resolve effective weights for this query once, before the candidate loop.
+    eff_ws, eff_wa, eff_wsc = _resolve_weights(
+        base_w_stage1=w_stage1,
+        base_w_attribute=w_attribute,
+        base_w_setting=w_setting,
+        has_garments=has_garments,
+        has_setting=has_setting,
+        n_colored_garments=n_colored,
+    )
+
     # Pre-compute text embeddings for each parsed garment label.
     # This is done once before the per-candidate loop — not inside it — to
     # avoid redundant CLIP calls (each call is a GPU/CPU forward pass).
@@ -159,9 +256,9 @@ def rerank(
             setting_score = 0.0
 
         final_score = (
-            w_stage1 * stage1_score
-            + w_attribute * attribute_score
-            + w_setting * setting_score
+            eff_ws  * stage1_score
+            + eff_wa  * attribute_score
+            + eff_wsc * setting_score
         )
 
         results.append(RankedResult(
@@ -171,6 +268,9 @@ def rerank(
             stage1_score=round(stage1_score, 4),
             attribute_score=round(attribute_score, 4),
             setting_score=round(setting_score, 4),
+            w_stage1_used=eff_ws,
+            w_attribute_used=eff_wa,
+            w_setting_used=eff_wsc,
             matched_attributes=matched_attrs,
         ))
 

@@ -29,7 +29,12 @@ class RetrieverConfig:
     db_path: str = "./chroma_db"
 
     # --- Models ---
-    clip_model: str = "ViT-L/14"
+    # CLIP model name — the single source of truth for this field across the
+    # whole retriever + app stack. app/main.py and app/run.py both read their
+    # default from here; do NOT introduce a second hardcoded string elsewhere.
+    # Must match what the indexer used: check the stored clip_model metadata
+    # in the collection, or pass --clip-model explicitly if they differ.
+    clip_model: str = "ViT-B/32"
     groq_model: str = "llama-3.3-70b-versatile"
 
     # --- Retrieval parameters ---
@@ -40,22 +45,33 @@ class RetrieverConfig:
     top_k_final: int = 5
 
     # --- Score fusion weights (must sum to 1.0) ---
-    w_stage1: float = 0.50
-    w_attribute: float = 0.35
+    # w_attribute is the weight that separates this system from plain CLIP.
+    # At 0.35 it was being outweighed by global CLIP similarity (0.50), which
+    # means compositional queries like 'red tie AND white shirt' ranked nearly
+    # the same as images that only matched one of the two garments.
+    # At 0.50 the reranker can actually distinguish partial from full matches.
+    w_stage1: float = 0.35
+    w_attribute: float = 0.50
     w_setting: float = 0.15
 
     # --- Matching thresholds ---
     # Euclidean RGB distance below which two colors are considered a match.
-    # 60 is approximately 14% of the 0-441 range for RGB space.
-    # It's deliberately generous because color naming and measurement both
-    # introduce ~10-15% of error independently.
-    color_distance_threshold: float = 60.0
+    # Raised from 60 to 80: covers perceptual near-matches like "tomato" vs
+    # "red" or "navy" vs "blue" that a human would consider the same garment color.
+    # The 0-441 range of RGB space makes 80 ≈ 18% tolerance.
+    color_distance_threshold: float = 80.0
 
     # CLIP cosine similarity threshold for garment label matching.
     # Cross-modal CLIP cosines (text vs image) for true matches typically land
-    # in the 0.20-0.35 range. 0.25 is chosen to accept genuine matches while
-    # rejecting completely unrelated regions.
-    garment_similarity_threshold: float = 0.25
+    # in the 0.20–0.35 range per the CLIP paper; 0.25 sits in the middle of
+    # that range and was silently rejecting many real matches.
+    # Lowered to 0.20 to recover those true positives at acceptable precision.
+    garment_similarity_threshold: float = 0.20
+
+    # Stage-1 ANN candidate pool. Raised from 100 to 200: gives the reranker
+    # 2× more material to reorder, which matters most for rare-attribute queries
+    # (e.g. 'red tie') where the true positive may not be in the CLIP top-100.
+    top_k_stage1: int = 200
 
     # --- LLM fallback ---
     # If True, skip the Groq API call and use simple keyword extraction instead.

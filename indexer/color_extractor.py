@@ -127,6 +127,40 @@ def color_name_to_rgb(color_word: str) -> Tuple[int, int, int] | None:
     """
     word = color_word.strip().lower()
 
+    # Normalize compound color names that LLMs commonly produce.
+    # Maps two-word phrases to the single canonical word in our tables.
+    _COMPOUNDS: dict[str, str] = {
+        "navy blue":    "navy",
+        "dark blue":    "navy",
+        "light blue":   "sky",
+        "sky blue":     "sky",
+        "royal blue":   "royal",
+        "cobalt blue":  "cobalt",
+        "dark green":   "forest",
+        "light green":  "mint",
+        "olive green":  "olive",
+        "dark red":     "maroon",
+        "light pink":   "blush",
+        "hot pink":     "hot pink",
+        "dark brown":   "brown",
+        "dark gray":    "charcoal",
+        "dark grey":    "charcoal",
+        "light gray":   "silver",
+        "light grey":   "silver",
+        "off white":    "off-white",
+        "off-white":    "off-white",
+        "dark purple":  "purple",
+        "light purple": "lavender",
+        "bright yellow":"yellow",
+        "bright red":   "red",
+        "bright blue":  "blue",
+        "bright green": "green",
+        "bright orange":"orange",
+        "dark orange":  "rust",
+    }
+    if word in _COMPOUNDS:
+        word = _COMPOUNDS[word]
+
     # Direct hit in our palette.
     if word in _REFERENCE_PALETTE:
         return _REFERENCE_PALETTE[word]
@@ -179,19 +213,14 @@ def color_name_to_rgb(color_word: str) -> Tuple[int, int, int] | None:
     if word in _SYNONYMS:
         return _SYNONYMS[word]
 
-    # CSS4 fallback via webcolors.
+    # CSS4 fallback via webcolors — covers names like "grey", "chocolate", "azure",
+    # "plum", "tomato", etc. that aren't in our palette or synonym table.
+    # IMPORTANT: name_to_hex() returns a hex *string* ("#ffff00"), not an RGB
+    # tuple. Always convert through hex_to_rgb(); never return the hex directly.
     try:
         import webcolors
-        return webcolors.name_to_hex(word)  # type: ignore[return-value]
-        # webcolors returns hex; convert to RGB tuple.
-    except Exception:
-        pass
-
-    # Second attempt: try webcolors with the hex → rgb conversion.
-    try:
-        import webcolors
-        hex_val = webcolors.name_to_hex(word)
-        rgb = webcolors.hex_to_rgb(hex_val)
+        hex_val = webcolors.name_to_hex(word)          # raises ValueError if unknown
+        rgb = webcolors.hex_to_rgb(hex_val)            # IntegerRGB namedtuple
         return (rgb.red, rgb.green, rgb.blue)
     except Exception:
         return None

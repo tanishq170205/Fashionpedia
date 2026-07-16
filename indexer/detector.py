@@ -36,14 +36,16 @@ from PIL import Image
 # Combined prompt runs garment + person detection in one forward pass,
 # which roughly halves inference time on CPU compared to two separate passes.
 _COMBINED_PROMPT = (
-    "person . shirt . jacket . coat . pants . dress . skirt . hat . bag . shoes . tie . "
+    "person . man . woman . shirt . jacket . coat . pants . dress . skirt . hat . bag . shoes . tie . "
     "jeans . sweater . blazer . shorts . scarf . gloves . belt . suit . hoodie . "
     "cardigan . trousers . windbreaker . saree . kimono . vest . leggings . "
     "boots . sneakers . sandals . handbag . backpack . cap . beanie"
 )
 
-# Labels that belong to the "person" category — used to split combined results.
-_PERSON_LABELS = {"person", "man", "woman", "child", "boy", "girl", "people"}
+# Labels that belong to the "person" category — must match the tokens in
+# _COMBINED_PROMPT exactly. Only "person", "man", "woman" are in the prompt;
+# adding more here without adding them to the prompt creates dead branches.
+_PERSON_LABELS = {"person", "man", "woman"}
 
 
 def load_detector(model_name: str = "groundingdino", device: str = "cuda") -> Any:

@@ -19,7 +19,9 @@ Then open http://localhost:8000 in your browser.
 from __future__ import annotations
 
 import base64
+import json
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -58,19 +60,38 @@ async def lifespan(app: FastAPI):
     import torch
 
     db_path = os.environ.get("CHROMA_DB_PATH", str(_REPO_ROOT / "chroma_db"))
-    clip_model = os.environ.get("CLIP_MODEL", "ViT-B/32")
-    device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-
-    print(f"[startup] Loading CLIP {clip_model} on {device} ...")
-    load_clip(clip_model, device)
+    # Read the default from RetrieverConfig — the single source of truth.
+    # Do NOT hardcode a model string here; change RetrieverConfig.clip_model instead.
+    clip_model = os.environ.get("CLIP_MODEL", RetrieverConfig.clip_model)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"[startup] Opening ChromaDB at {db_path} ...")
     client = chromadb.PersistentClient(path=db_path)
     collection = client.get_collection("fashion_images")
     print(f"[startup] Collection has {collection.count()} documents.")
 
+    # ---- Model mismatch guard (fix 1b) ----------------------------------------
+    # The indexer stores clip_model in every document's metadata. Peek at the
+    # first document and compare. A mismatch means query embeddings and index
+    # embeddings live in different vector spaces — results would be garbage.
+    if collection.count() > 0:
+        peek = collection.peek(limit=1)
+        if peek["metadatas"]:
+            stored_model = peek["metadatas"][0].get("clip_model")
+            if stored_model and stored_model != clip_model:
+                raise RuntimeError(
+                    f"[CLIP model mismatch] Collection was indexed with \"{stored_model}\" "
+                    f"but \"{clip_model}\" was requested. "
+                    f"Either re-index with --clip-model {clip_model} or "
+                    f"pass CLIP_MODEL={stored_model} when starting the app."
+                )
+    # ---------------------------------------------------------------------------
+
+    print(f"[startup] Loading CLIP {clip_model} on {device} ...")
+    load_clip(clip_model, device)
+
     _state["collection"] = collection
-    _state["config"] = RetrieverConfig()
+    _state["config"] = RetrieverConfig(clip_model=clip_model, db_path=db_path)
     _state["image_dir"] = Path(
         os.environ.get(
             "IMAGE_DIR",
@@ -184,10 +205,19 @@ async def search(req: SearchRequest):
     groq_model = config.groq_model
     parsed = parse_query(req.query, groq_model=groq_model)
 
-    # Override k if the user requested more than the default.
+    # Build a config that inherits all defaults but respects the user's k.
+    base = _state["config"]
     config_copy = RetrieverConfig(
+        clip_model=base.clip_model,
+        db_path=base.db_path,
+        groq_model=base.groq_model,
         top_k_final=req.k,
         top_k_stage1=max(100, req.k * 10),
+        w_stage1=base.w_stage1,
+        w_attribute=base.w_attribute,
+        w_setting=base.w_setting,
+        color_distance_threshold=base.color_distance_threshold,
+        garment_similarity_threshold=base.garment_similarity_threshold,
     )
 
     ranked = run_query(req.query, config_copy, collection)
@@ -241,3 +271,102 @@ async def health():
         "status": "ok",
         "indexed_images": count.count() if count else 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Evaluation endpoints — support the /eval.html web judgment UI.
+# ---------------------------------------------------------------------------
+
+class JudgmentRequest(BaseModel):
+    query: str
+    image_id: str
+    relevant: bool
+
+
+_JUDGMENTS_DIR = Path(__file__).resolve().parent.parent / "eval" / "judgments"
+
+
+def _query_slug(query: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", query.lower()).strip("_")[:60]
+
+
+@app.post("/eval/judge")
+async def save_judgment(req: JudgmentRequest):
+    """
+    Save a single relevance judgment to eval/judgments/<slug>.json.
+    Creates/updates the file atomically with a per-image entry.
+    """
+    _JUDGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    slug = _query_slug(req.query)
+    path = _JUDGMENTS_DIR / f"{slug}.json"
+
+    data: dict = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+
+    data[req.image_id] = req.relevant
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return {"saved": True, "slug": slug, "total_judged": len(data)}
+
+
+@app.get("/eval/summary")
+async def eval_summary():
+    """
+    Compute P@5 and P@10 for every query that has a judgment file.
+    Returns per-query and overall means.
+    """
+    if not _JUDGMENTS_DIR.exists():
+        return {"queries": [], "mean_p5": None, "mean_p10": None}
+
+    BENCHMARK = [
+        "a person in a bright yellow raincoat",
+        "professional business attire inside a modern office",
+        "someone wearing a blue shirt sitting on a park bench",
+        "casual weekend outfit for a city walk",
+        "a red tie and a white shirt in a formal setting",
+        "a woman in a long yellow dress",
+        "a model in a denim jacket and blue jeans",
+        "a black blazer with white trousers on a runway",
+        "someone wearing a red coat outdoors",
+        "a floral dress at a fashion show",
+    ]
+
+    query_results = []
+    p5_vals, p10_vals = [], []
+
+    for query in BENCHMARK:
+        slug = _query_slug(query)
+        path = _JUDGMENTS_DIR / f"{slug}.json"
+        if not path.exists():
+            query_results.append({"query": query, "judged": 0, "p5": None, "p10": None})
+            continue
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # data is {image_id: bool} in insertion order (rank order).
+        judgments = list(data.values())
+        judged = len(judgments)
+
+        p5  = sum(judgments[:5])  / 5  if judged >= 5  else None
+        p10 = sum(judgments[:10]) / 10 if judged >= 10 else None
+
+        if p5  is not None: p5_vals.append(p5)
+        if p10 is not None: p10_vals.append(p10)
+
+        query_results.append({"query": query, "judged": judged, "p5": p5, "p10": p10})
+
+    return {
+        "queries":   query_results,
+        "mean_p5":   round(sum(p5_vals)  / len(p5_vals),  3) if p5_vals  else None,
+        "mean_p10":  round(sum(p10_vals) / len(p10_vals), 3) if p10_vals else None,
+    }
+
+
+@app.get("/eval")
+async def eval_page():
+    """Serve the web-based evaluation UI."""
+    from fastapi.responses import FileResponse
+    eval_html = Path(__file__).resolve().parent / "static" / "eval.html"
+    return FileResponse(str(eval_html))

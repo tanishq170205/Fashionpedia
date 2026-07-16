@@ -1,11 +1,16 @@
 """
-CLIP text (and image) encoder for the retriever.
+CLIP text (and image) encoder for the retriever — dual-backend.
 
-This is a thin wrapper around the same openai/CLIP library used in the indexer.
+Supports both OpenAI's clip package and open_clip (for fashion-domain checkpoints
+such as hf-hub:Marqo/marqo-fashionCLIP).
+
+Backend selection is automatic based on model name format:
+  "ViT-B/32", "ViT-L/14"              → clip (OpenAI package)
+  "hf-hub:Marqo/marqo-fashionCLIP"   → open_clip package
+
 The vectors produced here are directly comparable to those stored in ChromaDB
-because they come from the same model weights — the comparison is only valid
-if the same model name is used in both the indexer and the retriever, which is
-enforced by storing clip_model in the collection metadata.
+only if the same model was used during indexing. The model mismatch guard in
+app/main.py enforces this at startup.
 """
 
 from __future__ import annotations
@@ -14,17 +19,29 @@ import torch
 import numpy as np
 from PIL import Image
 
-import clip  # type: ignore
-
 
 _model = None
 _preprocess = None
+_tokenizer = None   # used by open_clip only
 _device: str = "cpu"
 _loaded_model_name: str = ""
+_backend: str = ""  # "clip" or "open_clip"
 
 
-def load_model(model_name: str = "ViT-L/14", device: str = "cpu") -> None:
-    global _model, _preprocess, _device, _loaded_model_name
+_OPENAI_CLIP_NAMES = {
+    "RN50", "RN101", "RN50x4", "RN50x16", "RN50x64",
+    "ViT-B/32", "ViT-B/16", "ViT-L/14", "ViT-L/14@336px",
+}
+
+
+def _is_open_clip_model(model_name: str) -> bool:
+    if model_name in _OPENAI_CLIP_NAMES:
+        return False
+    return True  # hf-hub: prefix or any unknown format
+
+
+def load_model(model_name: str = "ViT-B/32", device: str = "cpu") -> None:
+    global _model, _preprocess, _tokenizer, _device, _loaded_model_name, _backend
 
     if _model is not None and _loaded_model_name == model_name:
         return
@@ -33,8 +50,28 @@ def load_model(model_name: str = "ViT-L/14", device: str = "cpu") -> None:
         device = "cpu"
 
     _device = device
-    _model, _preprocess = clip.load(model_name, device=device)
-    _model.eval()
+
+    if _is_open_clip_model(model_name):
+        try:
+            import open_clip  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "open_clip_torch is required for fashion-domain checkpoints. "
+                "Install with: pip install open_clip_torch"
+            ) from e
+        _model, _, _preprocess = open_clip.create_model_and_transforms(
+            model_name, device=device
+        )
+        _model.eval()
+        _tokenizer = open_clip.get_tokenizer(model_name)
+        _backend = "open_clip"
+    else:
+        import clip  # type: ignore
+        _model, _preprocess = clip.load(model_name, device=device)
+        _model.eval()
+        _tokenizer = None
+        _backend = "clip"
+
     _loaded_model_name = model_name
 
 
@@ -43,7 +80,12 @@ def encode_text(text: str) -> np.ndarray:
     if _model is None:
         raise RuntimeError("Call load_model() before encode_text().")
 
-    tokens = clip.tokenize([text], truncate=True).to(_device)
+    if _backend == "open_clip":
+        tokens = _tokenizer([text]).to(_device)
+    else:
+        import clip  # type: ignore
+        tokens = clip.tokenize([text], truncate=True).to(_device)
+
     with torch.no_grad():
         embedding = _model.encode_text(tokens)
 

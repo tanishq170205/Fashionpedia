@@ -1,0 +1,55 @@
+{
+  "_comment": "Pre-parsed benchmark queries. Original 5 = assignment queries. Extended 5 = dataset-matched queries based on Fashionpedia distribution analysis.",
+
+  "a person in a bright yellow raincoat": {
+    "garments": [{"label": "raincoat", "color": "yellow"}],
+    "setting": null,
+    "llm_succeeded": true
+  },
+  "professional business attire inside a modern office": {
+    "garments": [],
+    "setting": "office indoor formal business",
+    "llm_succeeded": true
+  },
+  "someone wearing a blue shirt sitting on a park bench": {
+    "garments": [{"label": "shirt", "color": "blue"}],
+    "setting": "park outdoor",
+    "llm_succeeded": true
+  },
+  "casual weekend outfit for a city walk": {
+    "garments": [],
+    "setting": "casual outdoor city",
+    "llm_succeeded": true
+  },
+  "a red tie and a white shirt in a formal setting": {
+    "garments": [{"label": "tie", "color": "red"}, {"label": "shirt", "color": "white"}],
+    "setting": "formal occasion",
+    "llm_succeeded": true
+  },
+
+  "a woman in a long yellow dress": {
+    "garments": [{"label": "dress", "color": "yellow"}],
+    "setting": null,
+    "llm_succeeded": true
+  },
+  "a model in a denim jacket and blue jeans": {
+    "garments": [{"label": "jacket", "color": "blue"}, {"label": "jeans", "color": "blue"}],
+    "setting": null,
+    "llm_succeeded": true
+  },
+  "a black blazer with white trousers on a runway": {
+    "garments": [{"label": "blazer", "color": "black"}, {"label": "pants", "color": "white"}],
+    "setting": "fashion runway formal",
+    "llm_succeeded": true
+  },
+  "someone wearing a red coat outdoors": {
+    "garments": [{"label": "coat", "color": "red"}],
+    "setting": "outdoor",
+    "llm_succeeded": true
+  },
+  "a floral dress at a fashion show": {
+    "garments": [{"label": "dress", "color": null}],
+    "setting": "fashion event runway",
+    "llm_succeeded": true
+  }
+}

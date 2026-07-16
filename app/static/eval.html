@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Relevance Evaluation — Fashionpedia</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --rose:    #9C2748;
+    --rose-lt: #c94070;
+    --rose-bg: #fdf4f6;
+    --green:   #1a7a4a;
+    --green-lt:#22a062;
+    --red:     #c0392b;
+    --red-lt:  #e74c3c;
+    --gray:    #6b7280;
+    --border:  #e8d5da;
+    --card-bg: #ffffff;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--rose-bg);
+    min-height: 100vh;
+    color: #1a1a2e;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--rose);
+    padding: 1.2rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 2px 12px rgba(156,39,72,.3);
+  }
+  header .logo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.5rem;
+    color: #fff;
+    font-weight: 600;
+    letter-spacing: .04em;
+  }
+  header .subtitle {
+    font-size: .8rem;
+    color: rgba(255,255,255,.7);
+    margin-left: auto;
+    font-style: italic;
+  }
+  header a {
+    color: rgba(255,255,255,.85);
+    text-decoration: none;
+    font-size: .85rem;
+    border: 1px solid rgba(255,255,255,.4);
+    padding: .3rem .8rem;
+    border-radius: 20px;
+    transition: background .2s;
+  }
+  header a:hover { background: rgba(255,255,255,.15); }
+
+  /* ── Layout ── */
+  main { max-width: 860px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+
+  /* ── Intro / Query selector ── */
+  #intro { text-align: center; padding: 3rem 1rem; }
+  #intro h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 2.4rem;
+    font-weight: 400;
+    color: var(--rose);
+    margin-bottom: .5rem;
+  }
+  #intro p { color: var(--gray); font-size: .95rem; margin-bottom: 2rem; }
+
+  .query-list { display: flex; flex-direction: column; gap: .8rem; text-align: left; }
+  .query-card {
+    background: #fff;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .query-card:hover { border-color: var(--rose-lt); box-shadow: 0 4px 16px rgba(156,39,72,.12); }
+  .query-card.done { border-color: var(--green); background: #f0faf4; }
+  .query-card.done::after { content: '✓ Done'; color: var(--green); font-size: .8rem; font-weight: 600; }
+  .query-card.active { border-color: var(--rose); box-shadow: 0 4px 16px rgba(156,39,72,.2); }
+  .qtext { font-size: .95rem; font-style: italic; color: #333; }
+  .qstatus { font-size: .78rem; color: var(--gray); margin-left: 1rem; white-space: nowrap; }
+
+  /* ── Progress bar ── */
+  #progress-wrap {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: .8rem 1.2rem;
+    margin-bottom: 1.5rem;
+    display: none;
+  }
+  .progress-label {
+    font-size: .8rem;
+    color: var(--gray);
+    margin-bottom: .4rem;
+    display: flex;
+    justify-content: space-between;
+  }
+  .progress-bar-bg {
+    background: #f0e6ea;
+    border-radius: 6px;
+    height: 6px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--rose);
+    border-radius: 6px;
+    transition: width .4s ease;
+  }
+
+  /* ── Judge card ── */
+  #judge-wrap { display: none; }
+  .judge-header {
+    margin-bottom: 1.5rem;
+  }
+  .judge-header .query-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.3rem;
+    color: var(--rose);
+    font-style: italic;
+    margin-bottom: .3rem;
+  }
+  .judge-header .rank-label {
+    font-size: .85rem;
+    color: var(--gray);
+  }
+
+  .image-card {
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,.08);
+    margin-bottom: 1.5rem;
+    border: 1.5px solid var(--border);
+  }
+  .image-card img {
+    width: 100%;
+    max-height: 480px;
+    object-fit: contain;
+    background: #f5f5f5;
+    display: block;
+  }
+  .image-meta {
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    border-top: 1px solid var(--border);
+  }
+  .score-pill {
+    background: var(--rose-bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: .2rem .7rem;
+    font-size: .78rem;
+    color: var(--rose);
+    font-weight: 500;
+  }
+  .attr-pill {
+    background: #f0f4ff;
+    border: 1px solid #c5d0f5;
+    border-radius: 20px;
+    padding: .2rem .7rem;
+    font-size: .78rem;
+    color: #3a57c9;
+  }
+
+  /* ── Buttons ── */
+  .judge-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .btn {
+    flex: 1;
+    padding: 1rem;
+    border: none;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform .1s, box-shadow .2s;
+    font-family: 'Inter', sans-serif;
+  }
+  .btn:active { transform: scale(.97); }
+  .btn-relevant {
+    background: var(--green);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(26,122,74,.25);
+  }
+  .btn-relevant:hover { background: var(--green-lt); box-shadow: 0 6px 16px rgba(26,122,74,.35); }
+  .btn-not {
+    background: var(--red);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(192,57,43,.25);
+  }
+  .btn-not:hover { background: var(--red-lt); box-shadow: 0 6px 16px rgba(192,57,43,.35); }
+  .btn-skip {
+    flex: 0 0 auto;
+    padding: 1rem 1.4rem;
+    background: #f5f0f2;
+    color: var(--gray);
+    border: 1.5px solid var(--border);
+    font-size: .9rem;
+  }
+  .btn-skip:hover { background: #ede5e8; }
+
+  /* Keyboard hint */
+  .kbd-hint {
+    text-align: center;
+    font-size: .75rem;
+    color: #aaa;
+    margin-bottom: 1.5rem;
+  }
+  kbd {
+    background: #f5f0f2;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: .1rem .4rem;
+    font-size: .75rem;
+    font-family: monospace;
+  }
+
+  /* ── Summary screen ── */
+  #summary-wrap { display: none; }
+  .summary-header {
+    text-align: center;
+    padding: 2rem 0 1.5rem;
+  }
+  .summary-header h2 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 2rem;
+    color: var(--rose);
+    margin-bottom: .3rem;
+  }
+  .big-scores {
+    display: flex;
+    gap: 2rem;
+    justify-content: center;
+    margin: 1.5rem 0;
+  }
+  .big-score {
+    background: #fff;
+    border: 2px solid var(--rose);
+    border-radius: 16px;
+    padding: 1.5rem 2.5rem;
+    text-align: center;
+  }
+  .big-score .value {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 3rem;
+    color: var(--rose);
+    font-weight: 600;
+    line-height: 1;
+  }
+  .big-score .label {
+    font-size: .8rem;
+    color: var(--gray);
+    margin-top: .3rem;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .per-query-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    margin-top: 1.5rem;
+  }
+  .per-query-table th {
+    background: var(--rose);
+    color: #fff;
+    padding: .8rem 1rem;
+    text-align: left;
+    font-size: .8rem;
+    font-weight: 500;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .per-query-table td {
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    font-size: .88rem;
+  }
+  .per-query-table tr:last-child td { border-bottom: none; }
+  .per-query-table tr:hover td { background: var(--rose-bg); }
+  .score-val { font-weight: 600; color: var(--rose); }
+
+  .btn-restart {
+    display: block;
+    margin: 2rem auto 0;
+    padding: .8rem 2rem;
+    background: var(--rose);
+    color: #fff;
+    border: none;
+    border-radius: 24px;
+    font-size: .95rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: background .2s;
+  }
+  .btn-restart:hover { background: var(--rose-lt); }
+
+  /* Spinner */
+  .spinner {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border: 2px solid rgba(156,39,72,.3);
+    border-top-color: var(--rose);
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    vertical-align: middle;
+    margin-right: .4rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">The Edit Room — Eval</div>
+  <span class="subtitle">Relevance Judgment Tool</span>
+  <a href="/">← Search</a>
+</header>
+
+<main>
+
+  <!-- Intro & query selector -->
+  <div id="intro">
+    <h1>Relevance Evaluation</h1>
+    <p>Judge each result as relevant or not. We compute <strong>P@5</strong> and <strong>P@10</strong> automatically.</p>
+    <div class="query-list" id="query-list"></div>
+  </div>
+
+  <!-- Progress bar (shown during judging) -->
+  <div id="progress-wrap">
+    <div class="progress-label">
+      <span id="progress-text">Loading…</span>
+      <span id="progress-count"></span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- Judge view -->
+  <div id="judge-wrap">
+    <div class="judge-header">
+      <div class="query-label" id="judge-query-label"></div>
+      <div class="rank-label" id="judge-rank-label"></div>
+    </div>
+
+    <div class="image-card">
+      <img id="judge-img" src="" alt="result image"/>
+      <div class="image-meta" id="judge-meta"></div>
+    </div>
+
+    <div class="judge-buttons">
+      <button class="btn btn-relevant" id="btn-relevant" onclick="judge(true)">✓ Relevant</button>
+      <button class="btn btn-not"      id="btn-not"      onclick="judge(false)">✗ Not Relevant</button>
+      <button class="btn btn-skip"                       onclick="judge(null)">Skip</button>
+    </div>
+    <div class="kbd-hint">
+      Keyboard: <kbd>R</kbd> Relevant &nbsp; <kbd>N</kbd> Not Relevant &nbsp; <kbd>S</kbd> Skip
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div id="summary-wrap">
+    <div class="summary-header">
+      <h2>Evaluation Complete</h2>
+      <p style="color:var(--gray);font-size:.9rem">Your relevance judgments have been saved to <code>eval/judgments/</code></p>
+    </div>
+    <div class="big-scores">
+      <div class="big-score">
+        <div class="value" id="sum-p5">—</div>
+        <div class="label">Mean P@5</div>
+      </div>
+      <div class="big-score">
+        <div class="value" id="sum-p10">—</div>
+        <div class="label">Mean P@10</div>
+      </div>
+    </div>
+    <table class="per-query-table">
+      <thead>
+        <tr>
+          <th>Query</th>
+          <th>Judged</th>
+          <th>P@5</th>
+          <th>P@10</th>
+        </tr>
+      </thead>
+      <tbody id="sum-tbody"></tbody>
+    </table>
+    <button class="btn-restart" onclick="location.reload()">Judge Another Query</button>
+  </div>
+
+</main>
+
+<script>
+const QUERIES = [
+  // ── Original assignment benchmark ──
+  "a person in a bright yellow raincoat",
+  "professional business attire inside a modern office",
+  "someone wearing a blue shirt sitting on a park bench",
+  "casual weekend outfit for a city walk",
+  "a red tie and a white shirt in a formal setting",
+  // ── Dataset-matched queries (fashion editorial / runway) ──
+  "a woman in a long yellow dress",
+  "a model in a denim jacket and blue jeans",
+  "a black blazer with white trousers on a runway",
+  "someone wearing a red coat outdoors",
+  "a floral dress at a fashion show",
+];
+
+// State
+let currentQueryIdx  = 0;
+let currentResultIdx = 0;
+let allResults       = [];  // results for current query
+let doneQueries      = new Set();
+let queriesDone      = 0;
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  // Load summary to check which queries already have judgments
+  try {
+    const r = await fetch('/eval/summary');
+    const d = await r.json();
+    for (const q of d.queries) {
+      if (q.judged >= 10) doneQueries.add(q.query);
+    }
+  } catch (_) {}
+
+  renderQueryList();
+}
+
+function renderQueryList() {
+  const list = document.getElementById('query-list');
+  list.innerHTML = '';
+  QUERIES.forEach((q, i) => {
+    const card = document.createElement('div');
+    card.className = 'query-card' + (doneQueries.has(q) ? ' done' : '');
+    card.innerHTML = `<span class="qtext">"${q}"</span><span class="qstatus">${doneQueries.has(q) ? '' : 'Click to judge'}</span>`;
+    card.addEventListener('click', () => startQuery(i));
+    list.appendChild(card);
+  });
+}
+
+// ── Start judging a query ────────────────────────────────────────────────────
+async function startQuery(idx) {
+  currentQueryIdx  = idx;
+  currentResultIdx = 0;
+  allResults       = [];
+
+  const query = QUERIES[idx];
+
+  // Show progress bar
+  document.getElementById('intro').style.display = 'none';
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('judge-wrap').style.display    = 'block';
+  document.getElementById('summary-wrap').style.display  = 'none';
+
+  updateProgress(0, 10, query, 'Loading results…');
+
+  // Fetch results from /search
+  try {
+    const resp = await fetch('/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, top_k: 10 }),
+    });
+    const data = await resp.json();
+    allResults = data.results || [];
+  } catch (e) {
+    alert('Search API error: ' + e.message);
+    return;
+  }
+
+  showResult(0);
+}
+
+// ── Show result at index ─────────────────────────────────────────────────────
+function showResult(idx) {
+  if (idx >= allResults.length) {
+    finishQuery();
+    return;
+  }
+
+  const result = allResults[idx];
+  const query  = QUERIES[currentQueryIdx];
+
+  updateProgress(idx, allResults.length, query, `Image ${idx + 1} of ${allResults.length}`);
+
+  document.getElementById('judge-query-label').textContent = `"${query}"`;
+  document.getElementById('judge-rank-label').textContent  = `Rank ${idx + 1} / ${allResults.length}  ·  Score ${result.final_score}`;
+
+  const img = document.getElementById('judge-img');
+  img.src = '/image/' + result.filename;
+  img.alt = result.filename;
+
+  // Meta pills
+  const meta = document.getElementById('judge-meta');
+  meta.innerHTML =
+    `<span class="score-pill">CLIP ${result.stage1_score}</span>` +
+    `<span class="score-pill">ATTR ${result.attribute_score}</span>` +
+    `<span class="score-pill">SCENE ${result.setting_score}</span>` +
+    (result.matched_attributes || []).map(a =>
+      `<span class="attr-pill">${a.query_label}${a.query_color ? ' · ' + a.query_color : ''}</span>`
+    ).join('');
+}
+
+// ── Record judgment ──────────────────────────────────────────────────────────
+async function judge(relevant) {
+  const result = allResults[currentResultIdx];
+  const query  = QUERIES[currentQueryIdx];
+
+  if (relevant !== null) {
+    // Save to backend
+    await fetch('/eval/judge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, image_id: result.image_id, relevant }),
+    }).catch(() => {});
+  }
+
+  currentResultIdx++;
+  showResult(currentResultIdx);
+}
+
+// ── Finish a query ───────────────────────────────────────────────────────────
+async function finishQuery() {
+  doneQueries.add(QUERIES[currentQueryIdx]);
+  queriesDone++;
+
+  // Check if all queries done
+  if (doneQueries.size === QUERIES.length) {
+    showSummary();
+  } else {
+    // Back to query selector
+    document.getElementById('intro').style.display       = 'block';
+    document.getElementById('progress-wrap').style.display = 'none';
+    document.getElementById('judge-wrap').style.display   = 'none';
+    renderQueryList();
+  }
+}
+
+// ── Summary screen ───────────────────────────────────────────────────────────
+async function showSummary() {
+  document.getElementById('intro').style.display       = 'none';
+  document.getElementById('progress-wrap').style.display = 'none';
+  document.getElementById('judge-wrap').style.display   = 'none';
+  document.getElementById('summary-wrap').style.display  = 'block';
+
+  try {
+    const r = await fetch('/eval/summary');
+    const d = await r.json();
+
+    document.getElementById('sum-p5').textContent  = d.mean_p5  != null ? d.mean_p5.toFixed(2)  : '—';
+    document.getElementById('sum-p10').textContent = d.mean_p10 != null ? d.mean_p10.toFixed(2) : '—';
+
+    const tbody = document.getElementById('sum-tbody');
+    tbody.innerHTML = '';
+    for (const q of d.queries) {
+      tbody.innerHTML +=
+        `<tr>
+          <td style="font-style:italic;color:#444">"${q.query}"</td>
+          <td>${q.judged}</td>
+          <td class="score-val">${q.p5  != null ? q.p5.toFixed(2)  : '—'}</td>
+          <td class="score-val">${q.p10 != null ? q.p10.toFixed(2) : '—'}</td>
+        </tr>`;
+    }
+  } catch(e) {
+    document.getElementById('sum-p5').textContent = 'Error';
+  }
+}
+
+// ── Progress bar helper ───────────────────────────────────────────────────────
+function updateProgress(current, total, query, label) {
+  const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent  = label;
+  document.getElementById('progress-count').textContent = `${current} / ${total}`;
+}
+
+// ── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (document.getElementById('judge-wrap').style.display === 'none') return;
+  if (e.key === 'r' || e.key === 'R') judge(true);
+  if (e.key === 'n' || e.key === 'N') judge(false);
+  if (e.key === 's' || e.key === 'S') judge(null);
+});
+
+init();
+</script>
+</body>
+</html>

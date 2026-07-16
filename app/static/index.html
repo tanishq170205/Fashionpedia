@@ -3,580 +3,697 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fashion Search — Glance ML</title>
+  <title>The Edit Room — Fashion Image Search</title>
+  <meta name="description" content="Two-stage fashion image retrieval: open-vocabulary garment detection + semantic reranking. Glance ML Internship Assignment." />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,700;1,500&family=Space+Grotesk:wght@300;400;500;600&family=Space+Mono&display=swap" rel="stylesheet" />
+
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
+    /* ── Tokens ──────────────────────────────────────────────────────── */
     :root {
-      --bg:        #07080f;
-      --surface:   #0f1118;
-      --surface2:  #161820;
-      --border:    rgba(255,255,255,0.07);
-      --accent:    #7c3aed;
-      --accent2:   #a855f7;
-      --pink:      #ec4899;
-      --text:      #e8eaf0;
-      --muted:     #6b7280;
-      --score-bar: #1e1f2e;
+      --rose:        #9C2748;   /* deep editorial rose — the brand colour */
+      --rose-dark:   #7A1B37;
+      --rose-light:  #F9EEF2;   /* tinted white for hover states */
+      --white:       #FFFFFF;
+      --off-white:   #FAF9F7;   /* content background */
+      --ink:         #1A1718;
+      --ink-mid:     #5C5257;
+      --ink-light:   #ADA5A8;
+      --rule:        #EDE8EA;
+      --confirmed:   #1B6B3A;
+      --partial:     #8B4513;
+
+      --f-display: 'Cormorant', Georgia, serif;
+      --f-ui:      'Space Grotesk', system-ui, sans-serif;
+      --f-mono:    'Space Mono', monospace;
     }
 
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', sans-serif;
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--f-ui);
       font-size: 14px;
-      line-height: 1.6;
+      color: var(--ink);
+      background: var(--off-white);
+      min-height: 100vh;
     }
 
-    /* ── Header ── */
-    header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 20px 40px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(7,8,15,0.85);
-      backdrop-filter: blur(12px);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .logo {
-      font-size: 18px;
-      font-weight: 700;
-      background: linear-gradient(135deg, var(--accent2), var(--pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      letter-spacing: -0.3px;
-    }
-    .logo-sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 4px; }
-
-    /* ── Hero / Search ── */
-    .hero {
-      padding: 60px 40px 40px;
-      text-align: center;
-    }
-    .hero h1 {
-      font-size: 36px;
-      font-weight: 700;
-      letter-spacing: -1px;
-      background: linear-gradient(135deg, #fff 40%, var(--accent2));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 10px;
-    }
-    .hero p { color: var(--muted); font-size: 15px; margin-bottom: 32px; }
-
-    .search-wrap {
-      max-width: 720px;
-      margin: 0 auto;
-      display: flex;
-      gap: 12px;
-    }
-    .search-input {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px 20px;
-      color: var(--text);
-      font-size: 15px;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .search-input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
-    }
-    .search-input::placeholder { color: var(--muted); }
-
-    .search-btn {
-      background: linear-gradient(135deg, var(--accent), var(--pink));
-      border: none;
-      border-radius: 12px;
-      padding: 14px 28px;
-      color: #fff;
-      font-size: 15px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      transition: opacity 0.2s, transform 0.1s;
-      white-space: nowrap;
-    }
-    .search-btn:hover { opacity: 0.9; }
-    .search-btn:active { transform: scale(0.98); }
-    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    /* ── Example queries ── */
-    .examples {
-      max-width: 720px;
-      margin: 16px auto 0;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: center;
-    }
-    .example-chip {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 6px 14px;
-      font-size: 12px;
-      color: var(--muted);
-      cursor: pointer;
-      transition: border-color 0.2s, color 0.2s;
-    }
-    .example-chip:hover { border-color: var(--accent); color: var(--accent2); }
-
-    /* ── Parsed query pill ── */
-    .parsed-bar {
-      max-width: 1200px;
-      margin: 0 auto 24px;
-      padding: 0 40px;
-      display: none;
-    }
-    .parsed-inner {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 18px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-    }
-    .parsed-label { color: var(--muted); font-weight: 500; }
-    .parsed-tag {
-      background: rgba(124,58,237,0.15);
-      border: 1px solid rgba(124,58,237,0.3);
-      border-radius: 6px;
-      padding: 3px 10px;
-      color: var(--accent2);
-      font-weight: 500;
-    }
-    .parsed-tag.color-tag {
-      background: rgba(236,72,153,0.12);
-      border-color: rgba(236,72,153,0.3);
-      color: var(--pink);
-    }
-    .parsed-tag.setting-tag {
-      background: rgba(16,185,129,0.12);
-      border-color: rgba(16,185,129,0.3);
-      color: #34d399;
-    }
-    .llm-badge {
-      margin-left: auto;
-      font-size: 11px;
-      color: var(--muted);
-      background: var(--surface2);
-      border-radius: 4px;
-      padding: 2px 8px;
-    }
-
-    /* ── Main layout ── */
-    main {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 40px 60px;
-    }
-
-    .results-header {
+    /* ── Full-width rose header ──────────────────────────────────────── */
+    .site-header {
+      background: var(--rose);
+      padding: 0 48px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 20px;
+      height: 64px;
     }
-    .results-count { color: var(--muted); font-size: 13px; }
-
-    /* ── Grid ── */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    .wordmark {
+      font-family: var(--f-display);
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: -0.3px;
+      text-decoration: none;
+      line-height: 1;
+    }
+    .wordmark em {
+      font-weight: 500;
+      font-style: italic;
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
       gap: 20px;
     }
-
-    /* ── Card ── */
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
-      animation: fadeUp 0.35s ease both;
+    .header-tag {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
     }
-    .card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(124,58,237,0.4);
-      box-shadow: 0 8px 32px rgba(124,58,237,0.12);
-    }
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(14px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .card:nth-child(2)  { animation-delay: 0.04s; }
-    .card:nth-child(3)  { animation-delay: 0.08s; }
-    .card:nth-child(4)  { animation-delay: 0.12s; }
-    .card:nth-child(5)  { animation-delay: 0.16s; }
-    .card:nth-child(6)  { animation-delay: 0.20s; }
-    .card:nth-child(7)  { animation-delay: 0.24s; }
-    .card:nth-child(8)  { animation-delay: 0.28s; }
-    .card:nth-child(9)  { animation-delay: 0.32s; }
-    .card:nth-child(10) { animation-delay: 0.36s; }
-
-    .card-img {
-      width: 100%;
-      aspect-ratio: 3/4;
-      object-fit: cover;
-      display: block;
-      background: var(--surface2);
+    .index-count {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 2px;
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: rgba(255,255,255,0.85);
+      padding: 4px 10px;
     }
 
-    .card-body { padding: 14px; }
-
-    .rank-score {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    /* ── Search hero ─────────────────────────────────────────────────── */
+    .search-hero {
+      background: var(--white);
+      border-bottom: 1px solid var(--rule);
+      padding: 52px 48px 36px;
+    }
+    .hero-eyebrow {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--rose);
       margin-bottom: 10px;
     }
-    .rank-badge {
-      background: linear-gradient(135deg, var(--accent), var(--pink));
-      border-radius: 6px;
-      padding: 2px 8px;
-      font-size: 11px;
+    .hero-headline {
+      font-family: var(--f-display);
+      font-size: 52px;
       font-weight: 700;
-      color: #fff;
+      line-height: 1;
+      letter-spacing: -1px;
+      color: var(--ink);
+      margin-bottom: 32px;
     }
-    .final-score {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text);
+    .hero-headline em {
+      font-style: italic;
+      font-weight: 500;
+      color: var(--rose);
     }
-    .final-score span { font-size: 12px; font-weight: 400; color: var(--muted); }
 
-    /* ── Score bars ── */
-    .score-rows { display: flex; flex-direction: column; gap: 6px; }
-    .score-row { display: flex; align-items: center; gap: 8px; }
-    .score-row-label { width: 60px; font-size: 11px; color: var(--muted); flex-shrink: 0; }
-    .bar-track {
-      flex: 1;
-      height: 5px;
-      background: var(--score-bar);
-      border-radius: 99px;
-      overflow: hidden;
-    }
-    .bar-fill {
-      height: 100%;
-      border-radius: 99px;
-      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .bar-fill.clip    { background: linear-gradient(90deg, #7c3aed, #a855f7); }
-    .bar-fill.attr    { background: linear-gradient(90deg, #ec4899, #f97316); }
-    .bar-fill.setting { background: linear-gradient(90deg, #06b6d4, #3b82f6); }
-    .score-val { font-size: 11px; color: var(--muted); width: 30px; text-align: right; flex-shrink: 0; }
-
-    /* ── Matched attributes ── */
-    .matches { margin-top: 12px; }
-    .matches-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
-    .match-chip {
-      display: inline-flex;
+    /* Search bar */
+    .search-bar {
+      display: flex;
       align-items: center;
-      gap: 4px;
-      background: rgba(124,58,237,0.1);
-      border: 1px solid rgba(124,58,237,0.2);
-      border-radius: 6px;
-      padding: 3px 8px;
+      max-width: 820px;
+      background: var(--off-white);
+      border: 1.5px solid var(--rule);
+      border-radius: 4px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .search-bar:focus-within {
+      border-color: var(--rose);
+      box-shadow: 0 0 0 3px rgba(156, 39, 72, 0.10);
+    }
+    .search-bar-icon {
+      padding: 0 14px 0 18px;
+      color: var(--ink-light);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+    }
+    .search-bar-icon svg { width: 18px; height: 18px; }
+    .search-input {
+      flex: 1;
+      background: none;
+      border: none;
+      outline: none;
+      font-family: var(--f-ui);
+      font-size: 17px;
+      font-weight: 400;
+      color: var(--ink);
+      padding: 16px 0;
+    }
+    .search-input::placeholder { color: var(--ink-light); }
+    .search-btn {
+      background: var(--rose);
+      border: none;
+      border-radius: 0 3px 3px 0;
+      color: var(--white);
+      font-family: var(--f-mono);
       font-size: 11px;
-      color: var(--accent2);
-      margin: 0 4px 4px 0;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 0 28px;
+      height: 54px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
-    .match-chip .arrow { color: var(--muted); }
+    .search-btn:hover   { background: var(--rose-dark); }
+    .search-btn:active  { transform: scale(0.98); }
+    .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    /* ── States ── */
-    .state-box {
-      text-align: center;
-      padding: 80px 20px;
-      color: var(--muted);
+    /* Example chips */
+    .examples {
+      margin-top: 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-width: 820px;
     }
-    .state-box .icon { font-size: 48px; margin-bottom: 16px; }
-    .state-box h2 { font-size: 18px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
-
-    .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin: 0 auto 16px;
+    .chip {
+      background: var(--white);
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--ink-mid);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      white-space: nowrap;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .chip:hover {
+      border-color: var(--rose);
+      color: var(--rose);
+      background: var(--rose-light);
+    }
 
-    .error-box {
-      background: rgba(239,68,68,0.08);
-      border: 1px solid rgba(239,68,68,0.25);
-      border-radius: 10px;
-      padding: 16px 20px;
-      color: #f87171;
+    /* Parsed strip */
+    .parsed-strip {
+      display: none;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule);
+      max-width: 820px;
+    }
+    .parsed-strip.visible { display: flex; }
+    .parsed-prefix {
+      font-family: var(--f-mono);
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-light);
+    }
+    .ptag {
+      font-family: var(--f-mono);
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: 2px;
+      background: var(--rose-light);
+      color: var(--rose);
+      border: 1px solid rgba(156,39,72,0.2);
+    }
+    .ptag.color-tag  { background: #F0ECF6; color: #5B3E8F; border-color: rgba(91,62,143,0.2); }
+    .ptag.scene-tag  { background: #EAF4EE; color: #1B6B3A; border-color: rgba(27,107,58,0.2); }
+    .llm-badge {
+      margin-left: auto;
+      font-family: var(--f-mono);
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      color: var(--ink-light);
+    }
+
+    /* ── Content area ────────────────────────────────────────────────── */
+    .content-area { padding: 36px 48px 72px; }
+
+    /* Results header */
+    .results-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      padding-bottom: 18px;
+      border-bottom: 2px solid var(--ink);
+      margin-bottom: 28px;
+    }
+    .results-heading {
+      font-family: var(--f-display);
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.5px;
+    }
+    .results-heading em { font-style: italic; font-weight: 500; color: var(--rose); }
+    .results-meta-right {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-light);
+    }
+
+    /* ── Results grid ────────────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 20px 16px;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      display: flex;
+      flex-direction: column;
+      animation: popIn 0.32s ease both;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .card:nth-child(2)  { animation-delay: .04s; }
+    .card:nth-child(3)  { animation-delay: .08s; }
+    .card:nth-child(4)  { animation-delay: .12s; }
+    .card:nth-child(5)  { animation-delay: .16s; }
+    .card:nth-child(6)  { animation-delay: .20s; }
+    .card:nth-child(7)  { animation-delay: .24s; }
+    .card:nth-child(8)  { animation-delay: .28s; }
+    .card:nth-child(9)  { animation-delay: .32s; }
+    .card:nth-child(10) { animation-delay: .36s; }
+
+    /* Image block */
+    .card-img-wrap {
+      position: relative;
+      overflow: hidden;
+      background: var(--rule);
+      aspect-ratio: 3/4;
+    }
+    .card-img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.5s ease;
+    }
+    .card:hover .card-img { transform: scale(1.04); }
+
+    /* Score ring — SVG arc badge, top-right */
+    .score-ring-wrap {
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 52px; height: 52px;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,0.25));
+    }
+    .ring-bg    { fill: var(--white); }
+    .ring-track { fill: none; stroke: var(--rule);           stroke-width: 3; }
+    .ring-fill  { fill: none; stroke: var(--rose);           stroke-width: 3;
+                  stroke-linecap: round; transform-origin: 26px 26px;
+                  transform: rotate(-90deg);
+                  transition: stroke-dasharray 0.6s ease; }
+    .ring-text  { font-family: var(--f-mono); font-size: 10px; font-weight: 700;
+                  fill: var(--ink); text-anchor: middle; dominant-baseline: middle; }
+    .ring-unit  { font-family: var(--f-mono); font-size: 6px; fill: var(--ink-mid);
+                  text-anchor: middle; dominant-baseline: middle; }
+
+    /* Rank stamp */
+    .rank-stamp {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: var(--rose);
+      color: var(--white);
+      font-family: var(--f-mono);
+      font-size: 9px;
+      letter-spacing: 0.05em;
+      padding: 3px 7px;
+      font-weight: 700;
+    }
+
+    /* Score breakdown bar at bottom — thin, visible on hover */
+    .score-ribbon {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: none;
+      padding: 8px 10px 7px;
+      display: flex;
+      gap: 10px;
+      transform: translateY(100%);
+      transition: transform 0.22s ease;
+    }
+    .card:hover .score-ribbon { transform: translateY(0); }
+    .mini-bar-group { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .mini-bar-label { font-family: var(--f-mono); font-size: 8px; letter-spacing: 0.06em;
+                      text-transform: uppercase; color: var(--ink-mid); }
+    .mini-bar-track { height: 3px; background: var(--rule); border-radius: 99px; overflow: hidden; }
+    .mini-bar-fill  { height: 100%; border-radius: 99px; }
+    .fill-clip    { background: var(--rose); }
+    .fill-attr    { background: #5B3E8F; }
+    .fill-scene   { background: #1B6B3A; }
+    .mini-bar-val { font-family: var(--f-mono); font-size: 8px; color: var(--ink-mid); }
+
+    /* Card caption */
+    .card-caption {
+      padding: 9px 2px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .caption-matched {
+      font-size: 12px;
+      color: var(--ink-mid);
+      line-height: 1.35;
+      min-height: 16px;
+    }
+    .attr-confirmed { color: var(--confirmed); font-weight: 500; }
+    .attr-partial   { color: var(--partial); }
+
+    /* ── State boxes ─────────────────────────────────────────────────── */
+    .state-wrap {
+      padding: 64px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .state-kicker {
+      font-family: var(--f-mono);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--rose);
+    }
+    .state-heading {
+      font-family: var(--f-display);
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--ink);
+    }
+    .state-body { font-size: 13px; color: var(--ink-mid); max-width: 480px; line-height: 1.6; }
+
+    /* Loading animation: three dots */
+    .dots { display: inline-flex; gap: 6px; margin-top: 4px; }
+    .dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--rose);
+            animation: pulse 1.1s ease-in-out infinite; }
+    .dot:nth-child(2) { animation-delay: 0.18s; }
+    .dot:nth-child(3) { animation-delay: 0.36s; }
+    @keyframes pulse { 0%,80%,100% { opacity: 0.2; transform: scale(0.9); }
+                       40% { opacity: 1; transform: scale(1); } }
+
+    /* Error */
+    .error-bar {
+      border-left: 3px solid var(--rose);
+      background: var(--rose-light);
+      padding: 12px 16px;
       margin-bottom: 24px;
+      font-family: var(--f-mono);
+      font-size: 12px;
+      color: var(--rose-dark);
     }
 
-    /* ── Responsive ── */
-    @media (max-width: 640px) {
-      header { padding: 16px 20px; }
-      .hero { padding: 40px 20px 28px; }
-      .hero h1 { font-size: 26px; }
-      .search-wrap { flex-direction: column; }
-      main { padding: 0 20px 40px; }
-      .grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 1100px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 860px)  { .grid { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 600px) {
+      .site-header { padding: 0 20px; height: 56px; }
+      .header-tag  { display: none; }
+      .search-hero { padding: 32px 20px 24px; }
+      .hero-headline { font-size: 36px; }
+      .content-area { padding: 24px 20px 48px; }
+      .grid { grid-template-columns: repeat(2, 1fr); gap: 14px 10px; }
+    }
+
+    /* ── Accessibility ───────────────────────────────────────────────── */
+    :focus-visible { outline: 2px solid var(--rose); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      .card, .card-img, .score-ribbon, .dot { animation: none !important; transition: none !important; }
     }
   </style>
 </head>
 <body>
 
-<header>
-  <div class="logo">FashionSearch <span class="logo-sub">by Glance ML</span></div>
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <a class="wordmark" href="/" aria-label="The Edit Room">The <em>Edit Room</em></a>
+  <div class="header-right">
+    <span class="header-tag">Fashion Retrieval · Glance ML</span>
+    <span class="index-count" id="indexCount" aria-live="polite">—</span>
+  </div>
 </header>
 
-<section class="hero">
-  <h1>Search by natural language</h1>
-  <p>Two-stage retrieval: open-vocabulary detection + semantic reranking</p>
-  <div class="search-wrap">
-    <input id="queryInput" class="search-input" type="text"
-      placeholder='e.g. "A red tie and a white shirt in a formal setting"'
-      autocomplete="off" />
-    <button id="searchBtn" class="search-btn" onclick="doSearch()">Search</button>
+<!-- ── Search hero ─────────────────────────────────────────────────────── -->
+<section class="search-hero" aria-label="Search">
+  <p class="hero-eyebrow">Two-stage retrieval · GDINO + CLIP + LLM</p>
+  <h1 class="hero-headline">Find the <em>exact look</em><br>you're imagining.</h1>
+
+  <div class="search-bar" role="search">
+    <span class="search-bar-icon" aria-hidden="true">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="8.5" cy="8.5" r="5.5"/>
+        <line x1="13" y1="13" x2="18" y2="18"/>
+      </svg>
+    </span>
+    <input
+      id="queryInput"
+      class="search-input"
+      type="search"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="e.g. a red tie and a white shirt in a formal setting"
+      aria-label="Fashion search query"
+    />
+    <button id="searchBtn" class="search-btn" onclick="doSearch()" aria-label="Search">Search</button>
   </div>
-  <div class="examples">
-    <div class="example-chip" onclick="setQuery(this)">A person in a bright yellow raincoat</div>
-    <div class="example-chip" onclick="setQuery(this)">Professional business attire inside a modern office</div>
-    <div class="example-chip" onclick="setQuery(this)">Someone wearing a blue shirt sitting on a park bench</div>
-    <div class="example-chip" onclick="setQuery(this)">Casual weekend outfit for a city walk</div>
-    <div class="example-chip" onclick="setQuery(this)">A red tie and a white shirt in a formal setting</div>
+
+  <!-- Example chips -->
+  <div class="examples" role="navigation" aria-label="Example queries">
+    <button class="chip" onclick="setQuery(this)">A bright yellow raincoat</button>
+    <button class="chip" onclick="setQuery(this)">Professional business attire inside a modern office</button>
+    <button class="chip" onclick="setQuery(this)">Someone wearing a blue shirt sitting on a park bench</button>
+    <button class="chip" onclick="setQuery(this)">Casual weekend outfit for a city walk</button>
+    <button class="chip" onclick="setQuery(this)">A red tie and a white shirt in a formal setting</button>
+  </div>
+
+  <!-- Parsed query -->
+  <div class="parsed-strip" id="parsedStrip" aria-live="polite">
+    <span class="parsed-prefix">Understood as</span>
+    <span id="parsedTokens"></span>
+    <span class="llm-badge" id="llmBadge"></span>
   </div>
 </section>
 
-<div class="parsed-bar" id="parsedBar">
-  <div class="parsed-inner" id="parsedInner"></div>
-</div>
-
-<main>
+<!-- ── Content ─────────────────────────────────────────────────────────── -->
+<main class="content-area" aria-label="Results">
   <div id="errorBox"></div>
-  <div class="results-header" id="resultsHeader" style="display:none">
-    <span class="results-count" id="resultsCount"></span>
+  <div id="resultsHeaderWrap" style="display:none">
+    <div class="results-header">
+      <h2 class="results-heading" id="resultsHeading">Results</h2>
+      <span class="results-meta-right" id="resultsMeta"></span>
+    </div>
   </div>
   <div id="content">
-    <div class="state-box">
-      <div class="icon">👗</div>
-      <h2>Ready to search</h2>
-      <p>Enter a description above or click one of the example queries</p>
+    <div class="state-wrap" role="status">
+      <span class="state-kicker">Ready</span>
+      <p class="state-heading">Describe any look</p>
+      <p class="state-body">
+        Try the five benchmark queries above — or write your own. The retriever parses garment types, colors, and scene context, then runs a two-stage semantic search across 3,200 indexed images.
+      </p>
     </div>
   </div>
 </main>
 
+<!-- ── JavaScript ──────────────────────────────────────────────────────── -->
 <script>
-const API = '';  // same origin
+const $ = id => document.getElementById(id);
 
-function setQuery(el) {
-  document.getElementById('queryInput').value = el.textContent;
+// Load index size
+(async () => {
+  try {
+    const r = await fetch('/health');
+    if (r.ok) {
+      const d = await r.json();
+      $('indexCount').textContent = `${d.indexed_images.toLocaleString()} images`;
+    }
+  } catch {}
+})();
+
+// Keyboard
+$('queryInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+function setQuery(btn) {
+  $('queryInput').value = btn.textContent.trim();
   doSearch();
 }
 
-document.getElementById('queryInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') doSearch();
-});
-
+// ── Search ─────────────────────────────────────────────────────────────
 async function doSearch() {
-  const query = document.getElementById('queryInput').value.trim();
+  const query = $('queryInput').value.trim();
   if (!query) return;
 
-  const btn = document.getElementById('searchBtn');
+  const btn = $('searchBtn');
   btn.disabled = true;
   btn.textContent = 'Searching…';
-
-  document.getElementById('errorBox').innerHTML = '';
-  document.getElementById('resultsHeader').style.display = 'none';
-  document.getElementById('parsedBar').style.display = 'none';
-  document.getElementById('content').innerHTML = `
-    <div class="state-box">
-      <div class="spinner"></div>
-      <h2>Searching…</h2>
-      <p>Running two-stage retrieval pipeline</p>
+  $('errorBox').innerHTML = '';
+  $('resultsHeaderWrap').style.display = 'none';
+  $('parsedStrip').classList.remove('visible');
+  $('content').innerHTML = `
+    <div class="state-wrap" role="status" aria-live="polite">
+      <span class="state-kicker">Working</span>
+      <p class="state-heading">Retrieving looks…</p>
+      <div class="dots" aria-hidden="true"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+      <p class="state-body">Stage 1: CLIP vector lookup · Stage 2: garment attribute reranking</p>
     </div>`;
 
   try {
-    const resp = await fetch(`${API}/search`, {
+    const resp = await fetch('/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, k: 10 }),
     });
-
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
-      throw new Error(err.detail || 'Unknown error');
+      const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(e.detail || 'Server error');
     }
-
     const data = await resp.json();
     renderParsed(data.parsed);
     renderResults(data.results, data.query);
   } catch (err) {
-    document.getElementById('errorBox').innerHTML =
-      `<div class="error-box">⚠ ${err.message}</div>`;
-    document.getElementById('content').innerHTML = `
-      <div class="state-box"><div class="icon">😕</div><h2>Search failed</h2><p>See error above</p></div>`;
+    $('errorBox').innerHTML = `<div class="error-bar">⚠ ${esc(err.message)}</div>`;
+    $('content').innerHTML = `
+      <div class="state-wrap" role="alert">
+        <span class="state-kicker">Error</span>
+        <p class="state-heading">Search failed</p>
+        <p class="state-body">Check the server is running and try again.</p>
+      </div>`;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Search';
   }
 }
 
-function renderParsed(parsed) {
-  const bar = document.getElementById('parsedBar');
-  const inner = document.getElementById('parsedInner');
-  inner.innerHTML = '';
-
-  const label = document.createElement('span');
-  label.className = 'parsed-label';
-  label.textContent = 'Parsed:';
-  inner.appendChild(label);
-
-  if (!parsed.garments.length && !parsed.setting) {
-    const none = document.createElement('span');
-    none.style.color = 'var(--muted)';
-    none.textContent = 'No structured attributes extracted';
-    inner.appendChild(none);
-  }
-
-  parsed.garments.forEach(g => {
-    if (g.label) {
-      const t = document.createElement('span');
-      t.className = 'parsed-tag';
-      t.textContent = g.label;
-      inner.appendChild(t);
-    }
-    if (g.color) {
-      const c = document.createElement('span');
-      c.className = 'parsed-tag color-tag';
-      c.textContent = g.color;
-      inner.appendChild(c);
-    }
-  });
-
-  if (parsed.setting) {
+// ── Parsed query ────────────────────────────────────────────────────────
+function renderParsed(p) {
+  const wrap = $('parsedTokens');
+  wrap.innerHTML = '';
+  const add = (text, cls) => {
     const s = document.createElement('span');
-    s.className = 'parsed-tag setting-tag';
-    s.textContent = '📍 ' + parsed.setting;
-    inner.appendChild(s);
+    s.className = 'ptag' + (cls ? ' ' + cls : '');
+    s.textContent = text;
+    wrap.appendChild(s);
+  };
+  if (!p.garments.length && !p.setting) { add('unstructured query'); }
+  else {
+    p.garments.forEach(g => {
+      if (g.label) add(g.label);
+      if (g.color) add(g.color, 'color-tag');
+    });
+    if (p.setting) add(p.setting, 'scene-tag');
   }
-
-  const badge = document.createElement('span');
-  badge.className = 'llm-badge';
-  badge.textContent = parsed.llm_succeeded ? 'LLM parsed' : 'keyword fallback';
-  inner.appendChild(badge);
-
-  bar.style.display = 'block';
+  $('llmBadge').textContent = p.llm_succeeded ? 'LLM parsed' : 'keyword fallback';
+  $('parsedStrip').classList.add('visible');
 }
 
+// ── Results ─────────────────────────────────────────────────────────────
 function renderResults(results, query) {
-  const header = document.getElementById('resultsHeader');
-  const count = document.getElementById('resultsCount');
-  const content = document.getElementById('content');
-
   if (!results.length) {
-    content.innerHTML = `<div class="state-box"><div class="icon">🔍</div><h2>No results</h2><p>Try rephrasing the query</p></div>`;
+    $('content').innerHTML = `
+      <div class="state-wrap">
+        <span class="state-kicker">No results</span>
+        <p class="state-heading">Nothing matched</p>
+        <p class="state-body">Try rephrasing, or ensure the index is fully populated.</p>
+      </div>`;
     return;
   }
 
-  count.textContent = `${results.length} result${results.length !== 1 ? 's' : ''} for "${query}"`;
-  header.style.display = 'flex';
+  $('resultsHeaderWrap').style.display = 'block';
+  $('resultsHeading').innerHTML = `Results for <em>"${esc(query)}"</em>`;
+  $('resultsMeta').textContent = `${results.length} of 3,200 images`;
 
   const grid = document.createElement('div');
   grid.className = 'grid';
+  grid.setAttribute('role', 'list');
 
-  results.forEach((r, i) => {
-    const card = document.createElement('div');
-    card.className = 'card';
+  results.forEach(r => {
+    const pct   = Math.round(r.final_score * 100);
+    const clip  = Math.round(r.stage1_score * 100);
+    const attr  = Math.round(r.attribute_score * 100);
+    const scene = Math.round(r.setting_score * 100);
+    const rank  = String(r.rank).padStart(2, '0');
 
-    // Image
-    const img = document.createElement('img');
-    img.className = 'card-img';
-    img.src = `/image/${r.filename}`;
-    img.alt = `Result ${r.rank}`;
-    img.loading = 'lazy';
-    img.onerror = () => { img.style.display = 'none'; };
-    card.appendChild(img);
+    // SVG arc — circumference of r=19 circle ≈ 119.4
+    const C = 2 * Math.PI * 19;
+    const dash = (pct / 100) * C;
 
-    // Body
-    const body = document.createElement('div');
-    body.className = 'card-body';
-
-    // Rank + final score
-    const rs = document.createElement('div');
-    rs.className = 'rank-score';
-    rs.innerHTML = `
-      <span class="rank-badge">#${r.rank}</span>
-      <span class="final-score">${(r.final_score * 100).toFixed(1)}<span>%</span></span>`;
-    body.appendChild(rs);
-
-    // Score breakdown bars
-    const rows = document.createElement('div');
-    rows.className = 'score-rows';
-    rows.innerHTML = `
-      ${scoreRow('CLIP', r.stage1_score, 'clip')}
-      ${scoreRow('Attr', r.attribute_score, 'attr')}
-      ${scoreRow('Scene', r.setting_score, 'setting')}`;
-    body.appendChild(rows);
-
-    // Matched attributes
+    // Matched attribute text
+    let matchHtml = '';
     if (r.matched_attributes.length) {
-      const matches = document.createElement('div');
-      matches.className = 'matches';
-      const title = document.createElement('div');
-      title.className = 'matches-title';
-      title.textContent = 'Matched';
-      matches.appendChild(title);
-
-      r.matched_attributes.forEach(a => {
-        const chip = document.createElement('span');
-        chip.className = 'match-chip';
-        const qlabel = a.query_color ? `${a.query_color} ${a.query_label}` : a.query_label;
-        const mlabel = a.matched_region_label;
-        chip.innerHTML = `${qlabel} <span class="arrow">→</span> ${mlabel}`;
-        matches.appendChild(chip);
-      });
-
-      body.appendChild(matches);
+      matchHtml = r.matched_attributes.map(a => {
+        const label = a.query_color ? `${a.query_color} ${a.query_label}` : a.query_label;
+        const cls   = a.garment_similarity > 0.28 ? 'attr-confirmed' : 'attr-partial';
+        return `<span class="${cls}">${esc(label)}</span>`;
+      }).join(' · ');
     }
 
-    card.appendChild(body);
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.setAttribute('role', 'listitem');
+    card.innerHTML = `
+      <div class="card-img-wrap">
+        <img class="card-img" src="/image/${esc(r.filename)}" alt="Result ${r.rank}"
+             loading="lazy" onerror="this.closest('.card-img-wrap').style.background='#ede8ea'" />
+
+        <!-- Rank stamp -->
+        <div class="rank-stamp" aria-hidden="true">#${rank}</div>
+
+        <!-- Score ring -->
+        <div class="score-ring-wrap" aria-label="Score ${pct}%">
+          <svg viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+            <circle class="ring-bg" cx="26" cy="26" r="22"/>
+            <circle class="ring-track" cx="26" cy="26" r="19"/>
+            <circle class="ring-fill" cx="26" cy="26" r="19"
+                    stroke-dasharray="${dash.toFixed(1)} ${C.toFixed(1)}"
+                    stroke-dashoffset="0"/>
+            <text class="ring-text" x="26" y="24">${pct}</text>
+            <text class="ring-unit" x="26" y="33">%</text>
+          </svg>
+        </div>
+
+        <!-- Score ribbon on hover -->
+        <div class="score-ribbon" aria-hidden="true">
+          ${miniBar('CLIP', clip, 'fill-clip')}
+          ${miniBar('ATTR', attr, 'fill-attr')}
+          ${miniBar('SCENE', scene, 'fill-scene')}
+        </div>
+      </div>
+
+      <div class="card-caption">
+        <div class="caption-matched">${matchHtml || '<span style="color:var(--ink-light)">—</span>'}</div>
+      </div>`;
+
     grid.appendChild(card);
   });
 
-  content.innerHTML = '';
-  content.appendChild(grid);
+  $('content').innerHTML = '';
+  $('content').appendChild(grid);
 }
 
-function scoreRow(label, value, cls) {
-  const pct = Math.min(Math.max(value, 0), 1) * 100;
+function miniBar(label, pct, fillClass) {
   return `
-    <div class="score-row">
-      <span class="score-row-label">${label}</span>
-      <div class="bar-track">
-        <div class="bar-fill ${cls}" style="width:${pct.toFixed(1)}%"></div>
+    <div class="mini-bar-group">
+      <div class="mini-bar-label">${label}</div>
+      <div class="mini-bar-track">
+        <div class="mini-bar-fill ${fillClass}" style="width:${pct}%"></div>
       </div>
-      <span class="score-val">${pct.toFixed(1)}%</span>
+      <div class="mini-bar-val">${pct}%</div>
     </div>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 </body>
