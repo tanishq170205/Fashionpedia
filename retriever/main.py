@@ -85,6 +85,7 @@ def main() -> None:
 
     client = chromadb.PersistentClient(path=config.db_path)
     collection = client.get_collection("fashion_images")
+    _assert_collection_model_matches(collection, config.clip_model)
 
     print(f"\nQuery: {query!r}")
     print("-" * 60)
@@ -109,6 +110,30 @@ def main() -> None:
                     f"color_dist={attr['color_distance']}, "
                     f"person_id={attr['person_id']}"
                 )
+
+
+def _assert_collection_model_matches(collection: chromadb.Collection, clip_model: str) -> None:
+    """
+    Guard against querying an index built with a different CLIP checkpoint.
+
+    CLIP embeddings from different models are not comparable. Without this
+    check, the CLI could silently rank with meaningless distances.
+    """
+    if collection.count() == 0:
+        return
+
+    peek = collection.peek(limit=1)
+    metadatas = peek.get("metadatas") or []
+    if not metadatas:
+        return
+
+    stored_model = metadatas[0].get("clip_model")
+    if stored_model and stored_model != clip_model:
+        raise RuntimeError(
+            f"Collection was indexed with {stored_model!r}, but the retriever "
+            f"is configured for {clip_model!r}. Re-index with the requested "
+            "model or pass --clip-model to match the existing collection."
+        )
 
 
 if __name__ == "__main__":

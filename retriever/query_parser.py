@@ -4,20 +4,17 @@ LLM-based query parser.
 Converts a raw natural language query into structured fields that the reranker
 can operate on. Uses Groq (llama-3.3-70b-versatile) via the groq Python SDK.
 
-Why LLM and not regex or keyword matching:
-  Fashion queries are phrased in an enormous variety of ways. "Something to
-  wear to a job interview" and "formal business attire" describe nearly the same
-  thing. A regex pattern for "formal" would catch the second but not the first.
-  An LLM that has read enough English can make that inference. The structured
-  output contract is enforced by the prompt; the LLM is not being asked to do
-  reasoning, just extraction, which models of this size do reliably.
+Why LLM instead of regex:
+  Fashion queries come in many phrasings. "Something for a job interview" and
+  "formal business attire" describe nearly the same thing. A regex for "formal"
+  catches the second but not the first. The LLM generalizes across phrasings
+  because it understands the semantics, not just the surface form.
 
-Fallback behavior:
-  If the Groq call fails (no API key, network error, rate limit) or returns
-  malformed JSON, the parser returns {"garments": [], "setting": None} and logs
-  a warning. The pipeline degrades gracefully: stage-1 CLIP similarity still
-  runs, and the reranker returns all-zero attribute scores. The final ranking is
-  stage-1-only, which is still better than nothing.
+Fallback:
+  If Groq is unavailable, the parser falls back to a keyword extractor that
+  catches the most common patterns (color + garment bigrams). The pipeline
+  degrades gracefully: stage-1 CLIP similarity still runs, and the final
+  ranking is stage-1-only rather than nothing.
 """
 
 from __future__ import annotations
@@ -32,14 +29,13 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Pre-parsed cache for the 5 benchmark queries.
-# This guarantees deterministic parsing at demo/eval time regardless of API
-# availability, rate limits, or Groq outages. The cache lives next to this
-# file so it's committed to the repo and always present.
-# Any query NOT in the cache still goes through the LLM as normal.
+# Pre-parsed cache for the benchmark queries.
+# This avoids API calls at demo/eval time and guarantees deterministic parsing
+# regardless of Groq availability. Any query not in the cache hits the LLM.
 # ---------------------------------------------------------------------------
 _CACHE_PATH = Path(__file__).resolve().parent.parent / "eval" / "parsed_cache.json"
 _QUERY_CACHE: dict = {}
+
 
 def _load_cache() -> None:
     global _QUERY_CACHE
@@ -48,54 +44,114 @@ def _load_cache() -> None:
     try:
         with open(_CACHE_PATH, encoding="utf-8") as f:
             data = json.load(f)
-        # Strip the metadata comment key.
         _QUERY_CACHE = {k: v for k, v in data.items() if not k.startswith("_")}
     except Exception:
-        pass  # silently ignore malformed cache
+        pass
+
 
 _load_cache()
 
 
 @dataclass
 class ParsedQuery:
-    # Each garment dict has {"label": str, "color": str | None}.
+    # Each garment is {"label": str, "color": str | None, "synonyms": list[str]}.
     garments: list[dict] = field(default_factory=list)
-    # Setting is a short description of scene/context, or None if not present.
+    # Setting describes scene/occasion, or None if not present.
     setting: Optional[str] = None
-    # True if the LLM call succeeded; False means we're running on keyword fallback.
+    # True if LLM parsed, False if keyword fallback.
     llm_succeeded: bool = True
 
 
-_SYSTEM_PROMPT = """You are a fashion query parser. Given a natural language query about clothing or outfits, extract structured information.
+# Garment synonyms: if the LLM/user says X, also match Y in region embeddings.
+# This widens recall without lowering the similarity threshold.
+GARMENT_SYNONYMS: dict[str, list[str]] = {
+    "raincoat":     ["coat", "jacket", "anorak", "mac"],
+    "coat":         ["jacket", "overcoat", "blazer"],
+    "jacket":       ["coat", "blazer", "cardigan"],
+    "blazer":       ["jacket", "suit jacket"],
+    "tie":          ["necktie", "bow tie"],
+    "shirt":        ["blouse", "top", "button-down"],
+    "pants":        ["trousers", "jeans", "chinos", "slacks"],
+    "jeans":        ["pants", "denim"],
+    "dress":        ["gown", "frock"],
+    "skirt":        ["mini skirt", "maxi skirt"],
+    "shoes":        ["boots", "sneakers", "heels", "footwear"],
+    "boots":        ["shoes", "footwear"],
+    "sweater":      ["jumper", "pullover", "knitwear"],
+    "hoodie":       ["sweatshirt", "sweater"],
+    "shorts":       ["bermuda", "cut-offs"],
+    "suit":         ["blazer", "jacket"],
+    "gown":         ["dress", "evening gown"],
+    "bag":          ["handbag", "purse", "tote"],
+    "hat":          ["cap", "beanie", "beret"],
+    "scarf":        ["wrap", "stole"],
+}
 
-Return ONLY a JSON object with this exact schema, no explanation, no markdown, no extra fields:
+# Expanded color mapping: normalise user color words to simple names.
+COLOR_NORMALISE: dict[str, str] = {
+    "bright yellow": "yellow",
+    "neon yellow":   "yellow",
+    "lemon":         "yellow",
+    "navy blue":     "navy",
+    "dark blue":     "navy",
+    "royal blue":    "blue",
+    "sky blue":      "blue",
+    "light blue":    "blue",
+    "dark red":      "maroon",
+    "wine":          "maroon",
+    "crimson":       "red",
+    "scarlet":       "red",
+    "dark green":    "green",
+    "forest green":  "green",
+    "olive green":   "olive",
+    "off white":     "white",
+    "off-white":     "white",
+    "cream":         "white",
+    "ivory":         "white",
+    "charcoal":      "grey",
+    "dark grey":     "grey",
+    "light grey":    "grey",
+    "tan":           "beige",
+    "nude":          "beige",
+    "camel":         "beige",
+    "mustard":       "yellow",
+}
+
+
+_SYSTEM_PROMPT = """\
+You are a fashion query parser. Given a natural language query about clothing, extract structured information.
+
+Return ONLY a JSON object with this exact schema — no explanation, no markdown:
 {"garments": [{"label": "...", "color": "..."}], "setting": "..."}
 
 Rules:
-- "garments" is a list of garment+color pairs. Each item must have "label" (garment type, e.g. "shirt", "pants", "dress") and "color" (color word, e.g. "red", "navy", "burgundy"). Set "color" to null if no color is mentioned for that garment.
-- "setting" is a short phrase describing the scene, occasion, or context (e.g. "office", "park", "formal occasion", "casual outdoor"). Set to null if no context is implied.
-- If no garments are mentioned at all (just vibe/setting), return an empty garments list.
-- Use simple English color words, not hex codes or RGB.
-- Do not invent garments that are not implied by the query.
-- For style queries like "casual weekend" or "business professional", infer the setting accurately but only list garments explicitly mentioned.
-- Garment label must be a single noun (e.g. "shirt" not "button-down shirt").
-- Common synonyms to normalise: "trousers"→"pants", "tee"→"shirt", "tee-shirt"→"shirt", "top"→"shirt", "sneakers"→"shoes", "trainers"→"shoes".
+- "garments": list of garment+color pairs. Each item must have:
+    "label" — the garment type as a single noun: shirt, pants, dress, coat, raincoat, blazer, tie, etc.
+    "color" — a simple English color word (red, yellow, white, navy, blue, black, grey, etc.) or null if not specified.
+- "setting": short phrase for scene/occasion/context, or null if none implied.
+  Examples: "office indoor formal", "park outdoor casual", "formal occasion", "urban street casual",
+            "fashion runway", "beach outdoor summer".
+- Do NOT invent garments not mentioned. Do NOT add colors not stated.
+- Normalise synonyms: trousers→pants, tee→shirt, top→shirt, sneakers→shoes, trainers→shoes, tee-shirt→shirt.
+- For "bright yellow", use color "yellow". For "navy blue", use "navy". For "dark red", use "maroon".
+- For style-only queries ("casual weekend", "business professional"), return empty garments list and infer setting.
+- Garment label must be a single noun. "button-down shirt" → label="shirt".
 
 Examples:
 Query: "a red tie and a white shirt in a formal setting"
 Output: {"garments": [{"label": "tie", "color": "red"}, {"label": "shirt", "color": "white"}], "setting": "formal occasion"}
-
-Query: "casual weekend outfit for a city walk"
-Output: {"garments": [], "setting": "casual outdoor city"}
-
-Query: "someone wearing a blue shirt sitting on a park bench"
-Output: {"garments": [{"label": "shirt", "color": "blue"}], "setting": "park outdoor"}
 
 Query: "a person in a bright yellow raincoat"
 Output: {"garments": [{"label": "raincoat", "color": "yellow"}], "setting": null}
 
 Query: "professional business attire inside a modern office"
 Output: {"garments": [], "setting": "office indoor formal business"}
+
+Query: "someone wearing a blue shirt sitting on a park bench"
+Output: {"garments": [{"label": "shirt", "color": "blue"}], "setting": "park outdoor"}
+
+Query: "casual weekend outfit for a city walk"
+Output: {"garments": [], "setting": "casual outdoor urban"}
 
 Query: "a grey blazer and black trousers"
 Output: {"garments": [{"label": "blazer", "color": "grey"}, {"label": "pants", "color": "black"}], "setting": null}
@@ -109,8 +165,15 @@ Output: {"garments": [{"label": "hoodie", "color": null}, {"label": "pants", "co
 Query: "elegant evening gown at a gala"
 Output: {"garments": [{"label": "dress", "color": null}], "setting": "formal event evening"}
 
-Query: "someone in a navy blazer and chinos at work"
-Output: {"garments": [{"label": "blazer", "color": "navy"}, {"label": "pants", "color": null}], "setting": "office indoor formal"}"""
+Query: "navy blazer and chinos at work"
+Output: {"garments": [{"label": "blazer", "color": "navy"}, {"label": "pants", "color": null}], "setting": "office indoor formal"}
+
+Query: "woman in a floral dress on a runway"
+Output: {"garments": [{"label": "dress", "color": null}], "setting": "fashion runway"}
+
+Query: "red coat outdoors in winter"
+Output: {"garments": [{"label": "coat", "color": "red"}], "setting": "outdoor winter"}
+"""
 
 
 def parse_query(query: str, groq_model: str = "llama-3.3-70b-versatile") -> ParsedQuery:
@@ -118,12 +181,16 @@ def parse_query(query: str, groq_model: str = "llama-3.3-70b-versatile") -> Pars
     Parse a natural language query into structured fields.
 
     Lookup order:
-    1. Pre-parsed cache (eval/parsed_cache.json) — instant, no API call,
-       guarantees deterministic behavior for the 5 benchmark queries.
-    2. Groq API with LLaMA-3.3-70B — handles arbitrary queries.
-    3. Keyword fallback — if API unavailable or fails.
+    1. Pre-parsed cache (eval/parsed_cache.json) — deterministic, no API call.
+    2. Groq LLaMA-3.3-70B — handles arbitrary queries.
+    3. Keyword fallback — if API unavailable.
     """
-    # Cache hit: return immediately, no API call needed.
+    # Pre-normalise the query before cache lookup.
+    normalised = _normalise_query(query)
+
+    if normalised in _QUERY_CACHE:
+        cached = _QUERY_CACHE[normalised]
+        return _validate_and_build(cached, llm_succeeded=cached.get("llm_succeeded", True))
     if query.strip() in _QUERY_CACHE:
         cached = _QUERY_CACHE[query.strip()]
         return _validate_and_build(cached, llm_succeeded=cached.get("llm_succeeded", True))
@@ -131,7 +198,7 @@ def parse_query(query: str, groq_model: str = "llama-3.3-70b-versatile") -> Pars
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         warnings.warn(
-            "GROQ_API_KEY not set. Falling back to keyword extraction. "
+            "GROQ_API_KEY not set. Using keyword fallback. "
             "Set the environment variable for better query understanding.",
             stacklevel=2,
         )
@@ -147,13 +214,11 @@ def parse_query(query: str, groq_model: str = "llama-3.3-70b-versatile") -> Pars
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": query},
             ],
-            temperature=0.0,   # deterministic — we want extraction, not creativity
+            temperature=0.0,
             max_tokens=256,
         )
 
         raw = response.choices[0].message.content.strip()
-
-        # Strip markdown code fences if the model wraps the JSON anyway.
         raw = re.sub(r"^```[a-z]*\n?", "", raw)
         raw = re.sub(r"\n?```$", "", raw)
 
@@ -161,24 +226,21 @@ def parse_query(query: str, groq_model: str = "llama-3.3-70b-versatile") -> Pars
         return _validate_and_build(parsed, llm_succeeded=True)
 
     except json.JSONDecodeError as e:
-        warnings.warn(
-            f"LLM returned malformed JSON: {e}. Falling back to keyword extraction.",
-            stacklevel=2,
-        )
+        warnings.warn(f"LLM returned malformed JSON: {e}. Using keyword fallback.", stacklevel=2)
+        return _keyword_fallback(query)
+    except Exception as e:
+        warnings.warn(f"Groq API call failed: {e}. Using keyword fallback.", stacklevel=2)
         return _keyword_fallback(query)
 
-    except Exception as e:
-        warnings.warn(
-            f"Groq API call failed: {e}. Falling back to keyword extraction.",
-            stacklevel=2,
-        )
-        return _keyword_fallback(query)
+
+def _normalise_query(query: str) -> str:
+    """Lowercase and strip the query for consistent cache lookup."""
+    return query.strip().lower()
 
 
 def _validate_and_build(parsed: dict, llm_succeeded: bool) -> ParsedQuery:
     """
-    Validate the LLM output structure and return a ParsedQuery.
-    Coerces types rather than raising on minor schema deviations.
+    Validate LLM output and return a ParsedQuery with synonym expansion.
     """
     garments = []
     for g in parsed.get("garments", []):
@@ -190,7 +252,20 @@ def _validate_and_build(parsed: dict, llm_succeeded: bool) -> ParsedQuery:
         color = g.get("color")
         if not isinstance(color, str):
             color = None
-        garments.append({"label": label.strip().lower(), "color": color})
+
+        # Normalise color (e.g. "bright yellow" → "yellow").
+        if color:
+            color = color.strip().lower()
+            color = COLOR_NORMALISE.get(color, color)
+
+        label = label.strip().lower()
+        synonyms = GARMENT_SYNONYMS.get(label, [])
+
+        garments.append({
+            "label":    label,
+            "color":    color,
+            "synonyms": synonyms,
+        })
 
     setting = parsed.get("setting")
     if not isinstance(setting, str) or not setting.strip():
@@ -201,19 +276,17 @@ def _validate_and_build(parsed: dict, llm_succeeded: bool) -> ParsedQuery:
 
 def _keyword_fallback(query: str) -> ParsedQuery:
     """
-    Extract garment+color pairs using simple token-matching when the LLM is
-    unavailable.
+    Token-matching fallback when the LLM is unavailable.
 
-    This is deliberately minimal — it catches the obvious patterns ("blue shirt",
-    "red tie") but misses paraphrases ("something formal", "business casual").
-    The comment here is intentional: this fallback should be visible in the code
-    as a degraded path, not presented as equivalent to the LLM parser.
+    Catches obvious patterns (color + garment bigrams) but misses paraphrases.
+    This is intentionally conservative — a bad parse is worse than no parse.
     """
     COLORS = {
         "red", "blue", "green", "yellow", "black", "white", "gray", "grey",
         "orange", "purple", "pink", "brown", "beige", "navy", "teal", "maroon",
         "burgundy", "olive", "cream", "ivory", "gold", "silver", "coral",
-        "turquoise", "indigo", "lavender", "rust", "camel", "khaki",
+        "turquoise", "indigo", "lavender", "rust", "camel", "khaki", "bright",
+        "dark", "light", "neon",
     }
     GARMENTS = {
         "shirt", "jacket", "coat", "pants", "dress", "skirt", "hat", "bag",
@@ -224,36 +297,47 @@ def _keyword_fallback(query: str) -> ParsedQuery:
         "blouse", "jumper", "pullover", "anorak", "parka", "uniform", "gown",
     }
     SETTINGS = {
-        "office": "office indoor formal",
-        "work": "office indoor formal",
-        "formal": "formal occasion",
+        "office":   "office indoor formal",
+        "work":     "office indoor formal",
+        "formal":   "formal occasion",
         "business": "office indoor formal",
-        "park": "park outdoor",
-        "outdoor": "outdoor",
-        "indoor": "indoor",
-        "casual": "casual outdoor",
-        "beach": "beach outdoor",
-        "wedding": "formal occasion",
-        "party": "social event",
-        "gym": "athletic outdoor",
-        "street": "street outdoor urban",
-        "city": "urban outdoor",
+        "park":     "park outdoor",
+        "outdoor":  "outdoor",
+        "indoor":   "indoor",
+        "casual":   "casual outdoor",
+        "beach":    "beach outdoor",
+        "wedding":  "formal occasion",
+        "party":    "social event",
+        "gym":      "athletic outdoor",
+        "street":   "street outdoor urban",
+        "city":     "urban outdoor",
+        "runway":   "fashion runway",
     }
 
     tokens = query.lower().split()
     garments = []
     setting = None
 
-    # Simple bigram scan: if a color precedes a garment, pair them.
     for i, token in enumerate(tokens):
         clean = token.strip(".,!?")
         if clean in GARMENTS:
+            # Look back up to 2 tokens for a color.
             color = None
-            if i > 0 and tokens[i - 1].strip(".,!?") in COLORS:
-                color = tokens[i - 1].strip(".,!?")
-            garments.append({"label": clean, "color": color})
+            for j in range(max(0, i - 2), i):
+                candidate = tokens[j].strip(".,!?")
+                if candidate in COLORS and candidate not in ("bright", "dark", "light", "neon"):
+                    color = candidate
+            # Normalise synonyms.
+            label = clean
+            if label == "trousers":
+                label = "pants"
+            elif label in ("tee", "top", "blouse"):
+                label = "shirt"
+            elif label in ("sneakers", "trainers"):
+                label = "shoes"
+            synonyms = GARMENT_SYNONYMS.get(label, [])
+            garments.append({"label": label, "color": color, "synonyms": synonyms})
 
-    # Setting: take the first matched keyword.
     for token in tokens:
         clean = token.strip(".,!?")
         if clean in SETTINGS:

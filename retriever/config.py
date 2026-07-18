@@ -34,7 +34,7 @@ class RetrieverConfig:
     groq_model: str = "llama-3.3-70b-versatile"
 
     # --- Retrieval parameters ---
-    top_k_stage1: int = 200   # raised from 100: more headroom for rare-attribute queries
+    top_k_stage1: int = 300   # wider stage-1 net gives the reranker more candidates for rare-attribute queries
     top_k_final: int = 5
 
     # --- Score fusion weights (must sum to 1.0) ---
@@ -53,7 +53,7 @@ class RetrieverConfig:
     #   Note: distributions overlap significantly -- vanilla ViT-B/32 has weak
     #   fashion garment discrimination. FashionCLIP is expected to separate them
     #   more cleanly; re-calibrate after re-index.
-    garment_similarity_threshold: float = 0.223
+    garment_similarity_threshold: float = 0.210  # lowered from 0.223 to admit synonym matches
 
     # Color distance (Euclidean RGB, stored region color vs query color ref):
     #   Positive pairs: mean=28.2  P50=22.4  P90=57.3

@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     """Load models and open the Chroma collection at server startup."""
     import torch
 
-    db_path = os.environ.get("CHROMA_DB_PATH", str(_REPO_ROOT / "chroma_db"))
+    db_path = os.environ.get("CHROMA_DB_PATH", str(_REPO_ROOT / RetrieverConfig.db_path))
     # Read the default from RetrieverConfig — the single source of truth.
     # Do NOT hardcode a model string here; change RetrieverConfig.clip_model instead.
     clip_model = os.environ.get("CLIP_MODEL", RetrieverConfig.clip_model)
@@ -212,7 +212,7 @@ async def search(req: SearchRequest):
         db_path=base.db_path,
         groq_model=base.groq_model,
         top_k_final=req.k,
-        top_k_stage1=max(100, req.k * 10),
+        top_k_stage1=max(base.top_k_stage1, req.k * 10),
         w_stage1=base.w_stage1,
         w_attribute=base.w_attribute,
         w_setting=base.w_setting,
