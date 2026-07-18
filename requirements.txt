@@ -33,6 +33,5 @@ webcolors>=1.13
 ftfy>=6.1.0
 regex>=2023.6.3
 
-# Optional: open_clip_torch is only needed if you use fashion-domain checkpoints.
-# Uncomment the line below or install separately.
-# open_clip_torch>=2.24.0
+# open_clip_torch is required for fashion-domain CLIP checkpoints (default model).
+open_clip_torch>=2.24.0

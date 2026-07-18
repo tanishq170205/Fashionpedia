@@ -161,6 +161,7 @@ def rerank(
     w_setting: float = 0.15,
     color_distance_threshold: float = 80.0,
     garment_similarity_threshold: float = 0.20,
+    use_gap_scoring: bool = True,
 ) -> list[RankedResult]:
     """
     Rerank stage-1 candidates using structured attribute matching.
@@ -169,10 +170,13 @@ def rerank(
         candidates:    Output of retrieval.stage1_retrieve().
         parsed_query:  Output of query_parser.parse_query().
         query_embedding: CLIP text embedding of the raw query (used for setting score).
-        w_*:           Base score fusion weights. These are redistributed per-query
-                       by _resolve_weights() before scoring — see that function.
+        w_*:           Base score fusion weights; redistributed per-query by _resolve_weights().
         color_distance_threshold: Max Euclidean RGB distance to count as color match.
-        garment_similarity_threshold: Min CLIP cosine similarity to count as garment match.
+        garment_similarity_threshold: Min CLIP cosine to count as garment match.
+        use_gap_scoring: If True, scale each garment match by a confidence factor derived
+            from (best_sim - second_best_sim). A decisive match (large gap) counts fully;
+            a marginal match (small gap) counts at ≥0.5. Set False for binary pass/fail
+            (original behaviour).
 
     Returns:
         List of RankedResult, sorted by final_score descending.
@@ -243,6 +247,7 @@ def rerank(
             garment_color_refs=garment_color_refs,
             garment_similarity_threshold=garment_similarity_threshold,
             color_distance_threshold=color_distance_threshold,
+            use_gap_scoring=use_gap_scoring,
         )
 
         # Setting score.
@@ -285,6 +290,7 @@ def _compute_attribute_score(
     garment_color_refs: list[Optional[tuple]],
     garment_similarity_threshold: float,
     color_distance_threshold: float,
+    use_gap_scoring: bool = True,
 ) -> tuple[float, list[dict]]:
     """
     Compute the attribute match score for one candidate image.
@@ -321,6 +327,7 @@ def _compute_attribute_score(
             garment_similarity_threshold=garment_similarity_threshold,
             color_distance_threshold=color_distance_threshold,
             person_id=pid,
+            use_gap_scoring=use_gap_scoring,
         )
         if score > best_score:
             best_score = score
@@ -339,6 +346,7 @@ def _compute_attribute_score(
             garment_similarity_threshold=garment_similarity_threshold,
             color_distance_threshold=color_distance_threshold,
             person_id=-1,
+            use_gap_scoring=use_gap_scoring,
         )
         best_score = fallback_score * 0.5
         best_matched = fallback_matched
@@ -354,71 +362,96 @@ def _match_garments_to_regions(
     garment_similarity_threshold: float,
     color_distance_threshold: float,
     person_id: int,
+    use_gap_scoring: bool = True,
 ) -> tuple[float, list[dict]]:
     """
     For a given set of regions (from one person instance), compute how many
     parsed garment+color pairs find a matching region.
 
     Garment match: CLIP cosine similarity between query label text embedding
-      and stored region_embedding (visual CLIP embedding of the crop) >= threshold.
-      This is the core fix for vocabulary-limited matching: "windbreaker" in the
-      query can match a "jacket" detection because their CLIP representations are
-      nearby in embedding space.
+      and stored region_embedding >= threshold.
 
-    Color match: Euclidean RGB distance between query color → reference RGB
-      and stored color_rgb <= threshold. Using raw RGB distances instead of
-      comparing color name strings avoids the "burgundy" vs "maroon" mismatch.
+    Color match: Euclidean RGB distance between query color reference RGB
+      and stored color_rgb <= threshold.
+
+    Gap scoring (use_gap_scoring=True):
+      For each matched garment, also find the second-best region similarity
+      from a *different* region. Compute gap = best_sim - second_best_sim.
+      Scale this garment's match contribution by:
+          confidence = clip(gap / 0.1, 0.5, 1.0)
+      A gap >= 0.1 gives full confidence (1.0); gap near 0 gives 0.5.
+      This means ambiguous matches (where many regions score similarly) count
+      less than decisive matches, improving ranking precision without discarding
+      weak-but-valid matches entirely.
     """
     matched = []
-    match_count = 0
+    match_score_sum = 0.0  # sum of per-garment confidence-weighted contributions
 
     for i, (parsed_g, label_vec, color_ref) in enumerate(
         zip(parsed_garments, garment_label_vecs, garment_color_refs)
     ):
-        best_region_for_this_garment = None
-        best_garment_sim = 0.0
+        best_sim = 0.0
+        second_best_sim = 0.0
+        best_region = None
 
         for region in regions:
             region_emb = region.get("region_embedding")
             if region_emb is None:
                 continue
 
-            # Cosine similarity — both vectors should be L2-normalized from indexing.
-            # Re-normalizing here is cheap and guards against any storage rounding.
+            # Cosine similarity — both vectors L2-normalized; re-norm guards rounding.
             rv = region_emb / (np.linalg.norm(region_emb) + 1e-10)
-            lv = label_vec / (np.linalg.norm(label_vec) + 1e-10)
+            lv = label_vec  / (np.linalg.norm(label_vec)  + 1e-10)
             garment_sim = float(np.dot(lv, rv))
 
-            if garment_sim >= garment_similarity_threshold and garment_sim > best_garment_sim:
-                best_garment_sim = garment_sim
-                best_region_for_this_garment = region
+            if garment_sim >= garment_similarity_threshold:
+                if garment_sim > best_sim:
+                    second_best_sim = best_sim  # demote old best
+                    best_sim = garment_sim
+                    best_region = region
+                elif garment_sim > second_best_sim:
+                    second_best_sim = garment_sim
 
-        if best_region_for_this_garment is None:
-            continue  # no region passed the garment similarity threshold
+        if best_region is None:
+            continue  # no region passed the threshold
 
-        # If a color was specified, check it against the region's measured RGB.
+        # Color check.
         color_matched = True
         color_distance = None
         if color_ref is not None:
-            stored_rgb = best_region_for_this_garment.get("color_rgb")
+            stored_rgb = best_region.get("color_rgb")
             if stored_rgb is not None:
                 color_distance = rgb_distance(stored_rgb, color_ref)
                 color_matched = color_distance <= color_distance_threshold
-            else:
-                # No color data stored for this region; skip color check.
-                color_matched = True
+            # If no color data stored, skip color check (stay True).
 
-        if color_matched:
-            match_count += 1
-            matched.append({
-                "query_label": parsed_g["label"],
-                "query_color": parsed_g["color"],
-                "matched_region_label": best_region_for_this_garment["label"],
-                "matched_region_color": best_region_for_this_garment.get("color_name"),
-                "garment_similarity": round(best_garment_sim, 3),
-                "color_distance": round(color_distance, 1) if color_distance is not None else None,
-                "person_id": person_id,
-            })
+        if not color_matched:
+            continue
 
-    score = match_count / len(parsed_garments)
+        # Confidence weighting (gap scoring).
+        if use_gap_scoring:
+            gap = best_sim - second_best_sim
+            # gap=0.1 → confidence=1.0 (decisive); gap→0 → confidence=0.5 (ambiguous).
+            confidence = float(np.clip(gap / 0.1, 0.5, 1.0))
+        else:
+            confidence = 1.0  # original binary behaviour
+
+        match_score_sum += confidence
+        matched.append({
+            "query_label":          parsed_g["label"],
+            "query_color":          parsed_g["color"],
+            "matched_region_label": best_region["label"],
+            "matched_region_color": best_region.get("color_name"),
+            "garment_similarity":   round(best_sim, 3),
+            "second_best_sim":      round(second_best_sim, 3),
+            "gap":                  round(best_sim - second_best_sim, 3),
+            "confidence":           round(confidence, 3),
+            "color_distance":       round(color_distance, 1) if color_distance is not None else None,
+            "person_id":            person_id,
+        })
+
+    # Normalize by total number of parsed garments (not just matched ones).
+    # This means a partial match (1 of 2 garments) always scores < a full match (2 of 2),
+    # even with gap scoring boosting the confidence of the one matched garment.
+    score = match_score_sum / len(parsed_garments)
     return score, matched

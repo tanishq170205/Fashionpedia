@@ -1,19 +1,14 @@
 """
-Retriever configuration.
+Retriever configuration — single source of truth for all weights and thresholds.
 
-All weights and thresholds are exposed here. The score fusion weights must
-sum to 1.0 — this is validated at startup in main.py.
+Default weight rationale (after _resolve_weights redistribution):
+  w_stage1=0.35: Global CLIP gives direction; attribute matching refines.
+  w_attribute=0.50: The core innovation — per-person garment+color matching.
+  w_setting=0.15: Noisy scene signal, useful at the margin only.
 
-Default weight rationale:
-  w_stage1=0.50: The full-image CLIP embedding captures overall scene and
-    garment gestalt well. It should dominate for queries without explicit
-    attribute structure ("casual weekend outfit").
-  w_attribute=0.35: Attribute matching is the main reason we built this
-    pipeline instead of just using plain CLIP. It needs enough weight to
-    reorder candidates when the stage-1 similarity is close.
-  w_setting=0.15: Setting/context matching is noisy because we're comparing
-    a short phrase embedding against a full-scene embedding; it helps at the
-    margin but shouldn't dominate.
+Thresholds (garment_similarity_threshold, color_distance_threshold) are marked
+"PENDING CALIBRATION" — run eval/calibrate_thresholds.py after each re-index
+to replace these with measured values from the actual embedding distribution.
 """
 
 from __future__ import annotations
@@ -26,56 +21,56 @@ from typing import Optional
 @dataclass
 class RetrieverConfig:
     # --- Storage ---
-    db_path: str = "./chroma_db"
+    db_path: str = "./chroma_db_fashion"
 
     # --- Models ---
-    # CLIP model name — the single source of truth for this field across the
-    # whole retriever + app stack. app/main.py and app/run.py both read their
-    # default from here; do NOT introduce a second hardcoded string elsewhere.
-    # Must match what the indexer used: check the stored clip_model metadata
-    # in the collection, or pass --clip-model explicitly if they differ.
-    clip_model: str = "ViT-B/32"
+    # Fashion-domain CLIP checkpoint (hf-hub format → loaded via open_clip_torch).
+    # Outperforms vanilla OpenAI ViT-B/32 on garment text-image alignment;
+    # directly addresses the assignment's "better than vanilla CLIP" bar.
+    # IMPORTANT: changing this requires re-indexing (embeddings are not comparable
+    # across models). The mismatch guard in app/main.py enforces this at startup.
+    clip_model: str = "hf-hub:Marqo/marqo-fashionCLIP"
+    clip_model_version: str = "marqo-fashionclip-v1"
     groq_model: str = "llama-3.3-70b-versatile"
 
     # --- Retrieval parameters ---
-    # How many candidates to pull in stage 1. 100 is a reasonable default:
-    # large enough that most true positives are in the candidate set,
-    # small enough that stage-2 reranking finishes in <1s on CPU.
-    top_k_stage1: int = 100
+    top_k_stage1: int = 200   # raised from 100: more headroom for rare-attribute queries
     top_k_final: int = 5
 
     # --- Score fusion weights (must sum to 1.0) ---
-    # w_attribute is the weight that separates this system from plain CLIP.
-    # At 0.35 it was being outweighed by global CLIP similarity (0.50), which
-    # means compositional queries like 'red tie AND white shirt' ranked nearly
-    # the same as images that only matched one of the two garments.
-    # At 0.50 the reranker can actually distinguish partial from full matches.
     w_stage1: float = 0.35
     w_attribute: float = 0.50
     w_setting: float = 0.15
 
-    # --- Matching thresholds ---
-    # Euclidean RGB distance below which two colors are considered a match.
-    # Raised from 60 to 80: covers perceptual near-matches like "tomato" vs
-    # "red" or "navy" vs "blue" that a human would consider the same garment color.
-    # The 0-441 range of RGB space makes 80 ≈ 18% tolerance.
-    color_distance_threshold: float = 80.0
+    # --- Matching thresholds (calibrated 2026-07-17 on ViT-B/32 / chroma_db) ---
+    # Source: eval/calibrate_thresholds.py -- 150 images, 50 pairs each.
+    # Re-run after any re-index: python eval/calibrate_thresholds.py --db-path <new_db> --clip-model <model>
+    #
+    # Garment similarity (CLIP cosine, image-crop vs text label):
+    #   Positive pairs: mean=0.237  P10=0.212  P50=0.242
+    #   Negative pairs: mean=0.215  P50=0.214  P90=0.233
+    #   Threshold = midpoint(pos_P10=0.212, neg_P90=0.233) = 0.223
+    #   Note: distributions overlap significantly -- vanilla ViT-B/32 has weak
+    #   fashion garment discrimination. FashionCLIP is expected to separate them
+    #   more cleanly; re-calibrate after re-index.
+    garment_similarity_threshold: float = 0.223
 
-    # CLIP cosine similarity threshold for garment label matching.
-    # Cross-modal CLIP cosines (text vs image) for true matches typically land
-    # in the 0.20–0.35 range per the CLIP paper; 0.25 sits in the middle of
-    # that range and was silently rejecting many real matches.
-    # Lowered to 0.20 to recover those true positives at acceptable precision.
-    garment_similarity_threshold: float = 0.20
+    # Color distance (Euclidean RGB, stored region color vs query color ref):
+    #   Positive pairs: mean=28.2  P50=22.4  P90=57.3
+    #   Negative pairs: mean=211.0  P10=113.3  P50=203.2
+    #   Threshold = midpoint(pos_P90=57.3, neg_P10=113.3) = 85.3
+    #   Clear separation -- color is a reliable signal. Value raised slightly
+    #   from previous estimate of 80.0.
+    color_distance_threshold: float = 85.3
 
-    # Stage-1 ANN candidate pool. Raised from 100 to 200: gives the reranker
-    # 2× more material to reorder, which matters most for rare-attribute queries
-    # (e.g. 'red tie') where the true positive may not be in the CLIP top-100.
-    top_k_stage1: int = 200
+    # --- Gap scoring (Task 4) ---
+    # When True, garment match contributions are scaled by a confidence factor
+    # derived from the gap between the best and second-best region similarity.
+    # A decisive match (large gap) counts fully; a marginal one counts partially.
+    # Disabling reverts to the original binary pass/fail behaviour for A/B comparison.
+    use_gap_scoring: bool = True
 
     # --- LLM fallback ---
-    # If True, skip the Groq API call and use simple keyword extraction instead.
-    # Useful when GROQ_API_KEY is not set or for offline testing.
     no_llm: bool = False
 
 
@@ -110,6 +105,12 @@ def parse_args() -> RetrieverConfig:
         default=False,
         help="Skip Groq LLM parsing and fall back to keyword extraction.",
     )
+    parser.add_argument(
+        "--no-gap-scoring",
+        action="store_true",
+        default=False,
+        help="Disable gap-scoring; revert to binary pass/fail garment matching for A/B comparison.",
+    )
 
     args = parser.parse_args()
 
@@ -125,6 +126,7 @@ def parse_args() -> RetrieverConfig:
         color_distance_threshold=args.color_distance_threshold,
         garment_similarity_threshold=args.garment_similarity_threshold,
         no_llm=args.no_llm,
+        use_gap_scoring=not args.no_gap_scoring,
     )
 
     total_weight = cfg.w_stage1 + cfg.w_attribute + cfg.w_setting

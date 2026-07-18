@@ -60,6 +60,7 @@ def run_query(query: str, config, collection: chromadb.Collection) -> list:
         w_setting=config.w_setting,
         color_distance_threshold=config.color_distance_threshold,
         garment_similarity_threshold=config.garment_similarity_threshold,
+        use_gap_scoring=config.use_gap_scoring,
     )
 
     return ranked[: config.top_k_final]

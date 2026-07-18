@@ -17,22 +17,15 @@ from typing import Optional
 class IndexerConfig:
     # --- Data paths ---
     image_dir: str = "./datasets/val_test2020/test"
-    db_path: str = "./chroma_db"
+    db_path: str = "./chroma_db_fashion"
 
     # --- Model choices ---
-    # CLIP model name. Two backends are supported (see indexer/embedder.py):
-    #   OpenAI CLIP  : "ViT-B/32", "ViT-L/14", "ViT-B/16", "ViT-L/14@336px"
-    #   open_clip    : any "hf-hub:org/model" identifier
-    #
-    # Fashion-domain checkpoints (strongly recommended for better retrieval):
-    #   "hf-hub:Marqo/marqo-fashionCLIP"       ← best-in-class for garment text-image alignment
-    #   "hf-hub:patrickjohncyh/fashion-clip"   ← alternative, slightly smaller
-    #
-    # NOTE: changing this requires re-indexing. The mismatch guard in app/main.py
-    # will refuse to start if the stored clip_model in the collection doesn't match.
-    clip_model: str = "ViT-B/32"
-    # Version tag stored in metadata; bump if you swap to a fine-tuned checkpoint.
-    clip_model_version: str = "openai"
+    # Default: fashion-domain CLIP (open_clip_torch backend).
+    # Provides substantially better garment text-image alignment than
+    # vanilla OpenAI ViT-B/32 for fashion retrieval tasks.
+    # Requires open_clip_torch (already in requirements.txt).
+    clip_model: str = "hf-hub:Marqo/marqo-fashionCLIP"
+    clip_model_version: str = "marqo-fashionclip-v1"
 
     # Detector backend: "groundingdino" or "owlvit".
     # "groundingdino" is tried first; owlvit is the explicit fallback.
